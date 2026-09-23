@@ -139,11 +139,11 @@ The command requires `HARKEN_LEAD_LLM_PROVIDER` and usable provider credentials.
 It also forces strict classification: if the classifier fails, fetched mentions are
 still stored but raw keyword matches are not treated as leads.
 
-For Primovezo, SMTP is an **internal notification channel only**. The runner does not
+For Primovezo, Resend is an **internal notification channel only**. The runner does not
 send email or social messages to prospects. It scans every keyword first, de-duplicates
 qualified posts across overlapping queries, and then sends at most one internal email
 digest containing the new leads, their scores, source links, reasons, and draft replies.
-If SMTP is not configured, the same leads remain available through `harken leads report`.
+If Resend is not configured, the same leads remain available through `harken leads report`.
 
 The current built-in profile covers ecommerce-intent queries such as:
 
@@ -190,7 +190,7 @@ Run that command once per day with cron or a systemd timer. In the Primovezo pro
 setup, new qualified leads are delivered through Resend to `HARKEN_RESEND_TO`, from
 `noreply@primovezo.com`. No prospect is contacted automatically.
 
-For the production user-level systemd timer, SMTP test, logs, and enable/disable
+For the production user-level systemd timer, Resend test, logs, and enable/disable
 commands, see [docs/primovezo-production.md](docs/primovezo-production.md).
 
 Threads uses Meta's official keyword-search API and requires a user access token
@@ -233,7 +233,7 @@ Set `HARKEN_WEBHOOK_URL` to a generic HTTP endpoint or Slack incoming webhook to
 
 Delivery state is kept in SQLite independently for each target: successful alerts are de-duplicated and failed alerts remain queued for the next scan. Webhook URLs and SMTP passwords are treated as secrets and never stored in alert target identifiers or error messages.
 
-Run `harken test-alert` to verify a configured webhook, or `harken test-alert --transport email` to send one clearly marked synthetic email without waiting for a real mention. For the internal Primovezo lead-digest format, run `harken test-alert --transport email --kind lead`. Add `--kind volume` or `--kind sentiment` to test threshold notifications.
+Run `harken test-alert` to verify a configured webhook, or `harken test-alert --transport email` to send one clearly marked synthetic email without waiting for a real mention. For the internal Primovezo lead-digest format, run `harken test-alert --transport resend --kind lead`. Add `--kind volume` or `--kind sentiment` to test threshold notifications.
 
 Optional volume and sentiment thresholds use every configured durable alert transport. They are disabled until explicitly configured:
 
@@ -370,7 +370,10 @@ Everything is optional and has a sane default — see [`.env.example`](.env.exam
 | `HARKEN_X_BEARER_TOKEN` | — | App-only bearer token for X API v2 recent search. |
 | `HARKEN_YOUTUBE_API_KEY` | — | API key for YouTube Data API v3 video search. |
 | `HARKEN_WEBHOOK_URL` | — | Generic or Slack webhook for mention and threshold alerts. |
-| `HARKEN_EMAIL_TO` / `HARKEN_EMAIL_FROM` | — | Comma-separated recipients and sender for email alerts. |
+| `HARKEN_RESEND_API_KEY` | — | Resend API key for the Primovezo internal lead digest. |
+| `HARKEN_RESEND_FROM` | `noreply@primovezo.com` | Sender for the Primovezo internal lead digest. |
+| `HARKEN_RESEND_TO` | — | Comma-separated internal recipients for the Primovezo lead digest. |
+| `HARKEN_EMAIL_TO` / `HARKEN_EMAIL_FROM` | — | Comma-separated recipients and sender for SMTP alerts. |
 | `HARKEN_SMTP_HOST` / `HARKEN_SMTP_PORT` | — / `587` | SMTP relay hostname and port. |
 | `HARKEN_SMTP_SECURITY` | `starttls` | `starttls`, `ssl`, or `none` for a trusted local relay. |
 | `HARKEN_SMTP_USERNAME` / `HARKEN_SMTP_PASSWORD` | — | Optional SMTP authentication pair. |
