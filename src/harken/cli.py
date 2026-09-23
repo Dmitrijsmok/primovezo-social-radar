@@ -297,7 +297,15 @@ def leads_primovezo(
     # Primovezo email is an internal once-per-run digest, never outbound contact
     # to the social author. Disable per-keyword transports during the scan.
     digest_email = _email_settings(cfg)
-    scan_cfg = replace(cfg, email_to=[], webhook_url=None)
+    scan_cfg = replace(
+        cfg,
+        email_to=[],
+        email_from=None,
+        smtp_host=None,
+        smtp_username=None,
+        smtp_password=None,
+        webhook_url=None,
+    )
 
     keywords = PRIMOVEZO_LEAD_KEYWORDS
     console.print(
