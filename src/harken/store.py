@@ -686,16 +686,31 @@ class Store:
         value["relevant"] = bool(value["relevant"])
         return value
 
-    def unique_leads(self, min_score: int = 70, limit: int = 100) -> list[dict]:
+    def unique_leads(
+        self,
+        min_score: int = 70,
+        limit: int = 100,
+        queries: list[str] | None = None,
+    ) -> list[dict]:
         """Return de-duplicated qualified leads, keeping the strongest classification."""
         if not 0 <= min_score <= 100:
             raise ValueError("min_score must be between 0 and 100")
         if limit < 1:
             raise ValueError("limit must be at least 1")
 
+        selected_queries = list(dict.fromkeys(query.strip() for query in queries or [] if query.strip()))
+        where = "WHERE l.relevant = 1"
+        args: list = []
+        if queries is not None:
+            if not selected_queries:
+                return []
+            placeholders = ",".join("?" for _ in selected_queries)
+            where += f" AND m.query IN ({placeholders})"
+            args.extend(selected_queries)
+
         with closing(self._conn.cursor()) as cur:
             cur.execute(
-                """
+                f"""
                 SELECT
                     m.source,
                     m.id,
@@ -714,7 +729,7 @@ class Store:
                 JOIN mentions AS m
                   ON m.id = l.mention_id
                  AND m.query = l.query
-                WHERE l.relevant = 1
+                {where}
                 ORDER BY
                     l.score DESC,
                     l.analyzed_at DESC,
@@ -722,7 +737,8 @@ class Store:
                     m.source,
                     m.id,
                     m.query COLLATE NOCASE
-                """
+                """,
+                args,
             )
             rows = [dict(row) for row in cur.fetchall()]
 
