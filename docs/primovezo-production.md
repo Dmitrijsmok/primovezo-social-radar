@@ -1,7 +1,7 @@
 # Primovezo Social Radar production schedule
 
 The Primovezo runner is intended to run once per day and send at most one
-**internal** ecommerce-lead digest to `HARKEN_EMAIL_TO`. It never contacts a
+**internal** ecommerce-lead digest to `HARKEN_RESEND_TO`. It never contacts a
 prospect automatically.
 
 ## 1. Configure the internal Resend digest
@@ -40,7 +40,7 @@ uv run harken leads primovezo --limit 10
 uv run harken leads report
 ```
 
-The scan stores qualified leads even if SMTP is not configured. With SMTP
+The scan stores qualified leads even if Resend is not configured. With Resend
 configured, the full scan sends one de-duplicated internal digest only when
 there are new or previously queued qualified leads.
 
