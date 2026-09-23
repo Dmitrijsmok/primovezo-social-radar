@@ -1135,9 +1135,7 @@ class Store:
             )
             return [_row_to_mention(row) for row in cur.fetchall()]
 
-    def pending_alerts_for_target(
-        self, target_key: str, limit: int = 100
-    ) -> list[Mention]:
+    def pending_alerts_for_target(self, target_key: str, limit: int = 100) -> list[Mention]:
         """Return undelivered mentions across queries for one delivery target."""
         if limit < 1:
             raise ValueError("limit must be at least 1")
