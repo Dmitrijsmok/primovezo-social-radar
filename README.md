@@ -89,7 +89,7 @@ Example with Gemini's OpenAI-compatible endpoint:
 HARKEN_LEAD_ENABLED=true
 HARKEN_LEAD_MIN_SCORE=70
 
-HARKEN_LLM_PROVIDER=openai
+HARKEN_LEAD_LLM_PROVIDER=openai
 HARKEN_LLM_API_KEY=<GEMINI_API_KEY>
 HARKEN_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
 HARKEN_LLM_MODEL=gemini-3.8-flash
