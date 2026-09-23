@@ -42,6 +42,9 @@ def test_config_defaults_without_env():
     assert cfg.log_format == "console"
     assert cfg.log_level == "INFO"
     assert cfg.email_to == []
+    assert cfg.resend_api_key is None
+    assert cfg.resend_from == "noreply@primovezo.com"
+    assert cfg.resend_to == []
     assert cfg.sentiment_analyzer == "lexicon"
     assert cfg.lead_fallback_alerts is True
     assert cfg.auth_mode == "none"
@@ -136,6 +139,25 @@ def test_lead_fallback_alerts_can_be_disabled(monkeypatch):
 def test_partial_email_configuration_is_rejected(monkeypatch):
     monkeypatch.setenv("HARKEN_EMAIL_TO", "ops@example.test")
     with pytest.raises(ValueError, match="must be set together"):
+        config.Config()
+
+
+def test_resend_digest_settings_are_loaded(monkeypatch):
+    monkeypatch.setenv("HARKEN_RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("HARKEN_RESEND_FROM", "noreply@primovezo.com")
+    monkeypatch.setenv("HARKEN_RESEND_TO", "owner@example.test,ops@example.test")
+
+    cfg = config.Config()
+
+    assert cfg.resend_api_key == "re_test_key"
+    assert cfg.resend_from == "noreply@primovezo.com"
+    assert cfg.resend_to == ["owner@example.test", "ops@example.test"]
+
+
+@pytest.mark.parametrize("name", ["HARKEN_RESEND_API_KEY", "HARKEN_RESEND_TO"])
+def test_partial_resend_configuration_is_rejected(monkeypatch, name):
+    monkeypatch.setenv(name, "re_test_key" if name.endswith("API_KEY") else "owner@example.test")
+    with pytest.raises(ValueError, match="HARKEN_RESEND_API_KEY and HARKEN_RESEND_TO"):
         config.Config()
 
 
