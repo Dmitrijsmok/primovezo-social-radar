@@ -23,7 +23,6 @@ from harken.alerts import (
     email_target_key,
     send_lead_alert,
     send_lead_digest_email,
-    send_lead_email,
     send_negative_alert,
     send_negative_email,
     send_threshold_alert,
@@ -486,9 +485,10 @@ def leads_report(
                         "",
                         f"[bold]Why:[/bold] {lead['reason']}",
                         (
-                            f"[bold]Suggested reply:[/bold] {lead['suggested_reply']}"
+                            f"[bold]Draft reply (not sent automatically):[/bold] "
+                            f"{lead['suggested_reply']}"
                             if lead["suggested_reply"]
-                            else "[bold]Suggested reply:[/bold] -"
+                            else "[bold]Draft reply (not sent automatically):[/bold] -"
                         ),
                         f"[bold]Open:[/bold] {lead['url'] or '-'}",
                     ]
@@ -1008,7 +1008,7 @@ def test_alert(
             if kind == "lead":
                 mention = Mention(
                     source="harken",
-                    query="interneta veikals",
+                    query="meklēju interneta veikalu",
                     author="Social Radar test",
                     text=(
                         "Meklēju e-komercijas platformu jaunam interneta veikalam. "
