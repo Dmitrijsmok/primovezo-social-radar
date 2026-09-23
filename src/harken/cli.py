@@ -391,15 +391,12 @@ def leads_primovezo(
                 time.sleep(delay)
 
         digest_target_key: str | None = None
-        digest_sender = None
         if digest_resend is not None:
             digest_target_key = "lead-" + resend_target_key(digest_resend)
-            digest_sender = lambda mentions: send_lead_digest_resend(digest_resend, mentions)
         elif digest_email is not None:
             digest_target_key = "lead-" + email_target_key(digest_email)
-            digest_sender = lambda mentions: send_lead_digest_email(digest_email, mentions)
 
-        if digest_target_key is not None and digest_sender is not None:
+        if digest_target_key is not None:
             pipe.store.enqueue_alerts(
                 candidate_mentions,
                 digest_target_key,
@@ -412,7 +409,10 @@ def leads_primovezo(
                 for mention in pending:
                     grouped[mention.query].append(mention.id)
                 try:
-                    digest_sender(pending)
+                    if digest_resend is not None:
+                        send_lead_digest_resend(digest_resend, pending)
+                    elif digest_email is not None:
+                        send_lead_digest_email(digest_email, pending)
                 except Exception as exc:
                     digest_error = f"{type(exc).__name__}: {exc}"
                     for query, ids in grouped.items():
