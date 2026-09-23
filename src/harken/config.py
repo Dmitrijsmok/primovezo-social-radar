@@ -137,9 +137,7 @@ class Config:
         )
     )
     llm_provider: str = field(default_factory=lambda: os.getenv("HARKEN_LLM_PROVIDER", "none"))
-    lead_enabled: bool = field(
-        default_factory=lambda: _bool_env("HARKEN_LEAD_ENABLED", False)
-    )
+    lead_enabled: bool = field(default_factory=lambda: _bool_env("HARKEN_LEAD_ENABLED", False))
     lead_llm_provider: str = field(
         default_factory=lambda: os.getenv("HARKEN_LEAD_LLM_PROVIDER", "none")
     )
