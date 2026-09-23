@@ -33,7 +33,29 @@ do not create a second copy of the same digest.
 SMTP remains supported by general Harken alerting, but it is not required for
 the Primovezo production setup.
 
-## 2. Verify a manual scan
+## 2. Install the short `harken` command
+
+Install a repo-aware wrapper once:
+
+```bash
+bash scripts/install-harken-command.sh
+```
+
+It keeps the repository as the working directory, so the local `.env` and
+`harken.db` are used even when the command is called from another directory.
+
+Useful shortcuts:
+
+```bash
+harken logs
+harken logs --min-score 80
+harken leads reclassify
+```
+
+`harken logs` is the short form of `harken leads report`. Reclassification
+updates stored lead analysis without fetching social networks or sending a digest.
+
+## 3. Verify a manual scan
 
 ```bash
 uv run harken leads primovezo --limit 10
@@ -44,7 +66,7 @@ The scan stores qualified leads even if Resend is not configured. With Resend
 configured, the full scan sends one de-duplicated internal digest only when
 there are new or previously queued qualified leads.
 
-## 3. Install the daily user timer
+## 4. Install the daily user timer
 
 ```bash
 bash scripts/install-primovezo-daily-timer.sh
