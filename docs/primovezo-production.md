@@ -58,7 +58,14 @@ updates stored lead analysis without fetching social networks or sending a diges
 
 ```bash
 uv run harken leads primovezo --limit 10
-uv run harken leads report
+harken logs
+```
+
+To inspect a bounded recent window without moving the daily cursor or sending email:
+
+```bash
+harken leads recent --days 5
+harken logs
 ```
 
 The scan stores qualified leads even if Resend is not configured. With Resend
