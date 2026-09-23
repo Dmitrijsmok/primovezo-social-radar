@@ -288,6 +288,75 @@ def test_retry_after_header_is_honored(tmp_path, monkeypatch):
     pipe.close()
 
 
+def test_bluesky_403_uses_slow_retry_backoff(tmp_path, monkeypatch):
+    from harken.sources import REGISTRY
+
+    class ThrottledBluesky:
+        calls = 0
+
+        def __init__(self, **options):
+            pass
+
+        def fetch(self, query, limit=50):
+            type(self).calls += 1
+            if type(self).calls < 3:
+                request = httpx.Request(
+                    "GET", "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts"
+                )
+                response = httpx.Response(403, request=request)
+                raise httpx.HTTPStatusError("forbidden", request=request, response=response)
+            return []
+
+    delays = []
+    monkeypatch.setitem(REGISTRY, "bluesky", ThrottledBluesky)
+    monkeypatch.setattr("harken.pipeline.time.sleep", delays.append)
+    pipe = Pipeline(
+        Config(
+            db_path=str(tmp_path / "bluesky-throttle.db"),
+            sources=["bluesky"],
+            source_retries=2,
+            retry_backoff=0.25,
+        )
+    )
+    result = pipe.track("acme")
+    assert not result.errors
+    assert result.retry_counts == {"bluesky": 2}
+    assert delays == [5.0, 10.0]
+    pipe.close()
+
+
+def test_non_bluesky_403_is_not_retried(tmp_path, monkeypatch):
+    from harken.sources import REGISTRY
+
+    class ForbiddenSource:
+        calls = 0
+
+        def __init__(self, **options):
+            pass
+
+        def fetch(self, query, limit=50):
+            type(self).calls += 1
+            request = httpx.Request("GET", "https://source.test")
+            response = httpx.Response(403, request=request)
+            raise httpx.HTTPStatusError("forbidden", request=request, response=response)
+
+    delays = []
+    monkeypatch.setitem(REGISTRY, "forbidden", ForbiddenSource)
+    monkeypatch.setattr("harken.pipeline.time.sleep", delays.append)
+    pipe = Pipeline(
+        Config(
+            db_path=str(tmp_path / "forbidden.db"),
+            sources=["forbidden"],
+            source_retries=3,
+        )
+    )
+    result = pipe.track("acme")
+    assert "forbidden" in result.errors
+    assert ForbiddenSource.calls == 1
+    assert delays == []
+    pipe.close()
+
+
 def test_nonretryable_source_error_fails_immediately(tmp_path, monkeypatch):
     from harken.sources import REGISTRY
 
