@@ -357,6 +357,8 @@ def test_primovezo_runner_sends_one_internal_digest(tmp_path, monkeypatch):
     class FakePipeline:
         def __init__(self, config):
             self.config = config
+            assert config.email_to == []
+            assert config.webhook_url is None
             self.store = Store(config.db_path)
 
         def track(self, query, pages=3):
@@ -453,8 +455,8 @@ def test_alert_command_can_send_synthetic_lead_email(monkeypatch):
     delivered = []
     monkeypatch.setattr(
         cli,
-        "send_lead_email",
-        lambda settings, query, mentions: delivered.append((settings, query, mentions)),
+        "send_lead_digest_email",
+        lambda settings, mentions: delivered.append((settings, mentions)),
     )
 
     result = runner.invoke(
@@ -463,9 +465,9 @@ def test_alert_command_can_send_synthetic_lead_email(monkeypatch):
     )
 
     assert result.exit_code == 0, result.output
-    settings, query, mentions = delivered[0]
+    settings, mentions = delivered[0]
     assert settings.recipients == ("ops@example.test",)
-    assert query == "interneta veikals"
+    assert mentions[0].query == "interneta veikals"
     assert mentions[0].lead_score == 92
     assert mentions[0].lead_category == "ecommerce"
     assert "e-komercijas platformu" in mentions[0].text
