@@ -225,6 +225,28 @@ def test_retention_removes_old_mentions_and_matching_alert_state(tmp_path):
     db.close()
 
 
+def test_pending_alerts_for_target_collects_cross_keyword_leads_once(tmp_path):
+    db = Store(tmp_path / "digest-outbox.db")
+    first = mk("same lead", source="bluesky", query="q1", url="https://x/shared")
+    second = mk("same lead", source="bluesky", query="q2", url="https://x/shared")
+    for mention in (first, second):
+        mention.lead_relevant = True
+        mention.lead_score = 90
+        mention.lead_category = "ecommerce"
+        mention.lead_reason = "Aktīvs pieprasījums"
+    db.upsert([first, second])
+    db.save_lead_analysis([first, second])
+
+    assert db.enqueue_alerts([first], "lead-email-test", dedupe_across_queries=True) == 1
+    assert db.enqueue_alerts([second], "lead-email-test", dedupe_across_queries=True) == 0
+
+    pending = db.pending_alerts_for_target("lead-email-test")
+    assert len(pending) == 1
+    assert pending[0].id == first.id
+    assert pending[0].lead_score == 90
+    db.close()
+
+
 def test_operational_stats_include_alert_state(tmp_path):
     db = Store(tmp_path / "stats.db")
     row = mk("negative", url="u1", sentiment=Sentiment.NEGATIVE)
