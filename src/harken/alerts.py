@@ -127,6 +127,35 @@ def send_negative_email(settings: EmailSettings, query: str, mentions: list[Ment
     _deliver_email(settings, subject, _alert_text(query, mentions))
 
 
+def send_lead_alert(url: str, query: str, mentions: list[Mention]) -> None:
+    """Deliver one lead-candidate batch to a generic webhook or Slack."""
+    if not mentions:
+        return
+    text = _lead_alert_text(query, mentions)
+    _deliver_webhook(
+        url,
+        {
+            "text": text,
+            "event": "harken.lead_candidates",
+            "query": query,
+            "count": len(mentions),
+            "mentions": [_mention_payload(mention) for mention in mentions],
+        },
+    )
+
+
+def send_lead_email(settings: EmailSettings, query: str, mentions: list[Mention]) -> None:
+    """Deliver one lead-candidate batch as a plain-text email."""
+    if not mentions:
+        return
+    count = len(mentions)
+    subject = (
+        f"[Social Radar] {count} new lead candidate{'s' if count != 1 else ''}: "
+        f"{_safe_header(query)}"
+    )
+    _deliver_email(settings, subject, _lead_alert_text(query, mentions))
+
+
 def send_threshold_email(settings: EmailSettings, text: str, payload: dict) -> None:
     """Deliver a persisted volume/sentiment threshold episode by email."""
     event = str(payload.get("event", "harken.threshold_alert")).removeprefix("harken.")
@@ -237,6 +266,42 @@ def _alert_text(query: str, mentions: list[Mention]) -> str:
     return "\n".join(lines)
 
 
+def _lead_alert_text(query: str, mentions: list[Mention]) -> str:
+    count = len(mentions)
+    lines = [f"Social Radar: {count} new lead candidate{'s' if count != 1 else ''} for “{query}”"]
+    for mention in mentions[:10]:
+        excerpt = " ".join(mention.content.split())[:500]
+        source = mention.source
+        if mention.author:
+            source += f" · {mention.author}"
+        if mention.lead_score is None:
+            lines.extend(
+                [
+                    "",
+                    f"• {source}",
+                    "  AI classification unavailable; review this keyword match manually.",
+                    f"  {excerpt}",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "",
+                    f"• {source} · score {mention.lead_score}/100"
+                    + (f" · {mention.lead_category}" if mention.lead_category else ""),
+                    f"  {mention.lead_reason or 'No reason supplied.'}",
+                    f"  {excerpt}",
+                ]
+            )
+            if mention.suggested_reply:
+                lines.append(f"  Suggested reply: {mention.suggested_reply}")
+        if mention.url:
+            lines.append(f"  Open: {mention.url}")
+    if count > 10:
+        lines.append(f"…and {count - 10} more")
+    return "\n".join(lines)
+
+
 def _mention_payload(mention: Mention) -> dict:
     return {
         "id": mention.id,
@@ -249,4 +314,9 @@ def _mention_payload(mention: Mention) -> dict:
         "score": mention.score,
         "sentiment_score": mention.sentiment_score,
         "theme": mention.theme,
+        "lead_relevant": mention.lead_relevant,
+        "lead_score": mention.lead_score,
+        "lead_category": mention.lead_category,
+        "lead_reason": mention.lead_reason,
+        "suggested_reply": mention.suggested_reply,
     }
