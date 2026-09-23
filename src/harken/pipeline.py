@@ -542,9 +542,9 @@ class Pipeline:
                 )
                 return page if isinstance(page, FetchPage) else FetchPage(page)
             except Exception as exc:
-                if attempt >= retries or not _retryable_source_error(exc):
+                if attempt >= retries or not _retryable_source_error(exc, source=name):
                     raise
-                delay = _retry_delay(exc, self.config.retry_backoff, attempt)
+                delay = _retry_delay(exc, self.config.retry_backoff, attempt, source=name)
                 attempt += 1
                 total_retries = result.retry_counts.get(name, 0) + 1
                 result.retry_counts[name] = total_retries
@@ -615,16 +615,28 @@ def _parse_json(raw: str) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-def _retryable_source_error(exc: Exception) -> bool:
+def _retryable_source_error(exc: Exception, *, source: str | None = None) -> bool:
     if isinstance(exc, httpx.RequestError):
         return True
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
+        # Bluesky's public search endpoint can answer with a temporary 403
+        # ("administrative rules") when search traffic is throttled. Keep this
+        # exception source-specific so auth/configuration 403s elsewhere still
+        # fail immediately.
+        if source == "bluesky" and status == 403:
+            return True
         return status == 429 or status >= 500
     return False
 
 
-def _retry_delay(exc: Exception, backoff: float, attempt: int) -> float:
+def _retry_delay(
+    exc: Exception,
+    backoff: float,
+    attempt: int,
+    *,
+    source: str | None = None,
+) -> float:
     if isinstance(exc, httpx.HTTPStatusError):
         retry_after = exc.response.headers.get("retry-after")
         if retry_after:
@@ -632,6 +644,8 @@ def _retry_delay(exc: Exception, backoff: float, attempt: int) -> float:
                 return min(max(float(retry_after), 0.0), 60.0)
             except ValueError:
                 pass
+        if source == "bluesky" and exc.response.status_code == 403:
+            return min(max(backoff, 5.0) * (2**attempt), 60.0)
     return min(backoff * (2**attempt), 60.0)
 
 
