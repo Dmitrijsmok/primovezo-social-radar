@@ -141,7 +141,9 @@ harken leads primovezo --limit 25 --delay 8
 
 The command requires `HARKEN_LEAD_LLM_PROVIDER` and usable provider credentials.
 It also forces strict classification: if the classifier fails, fetched mentions are
-still stored but raw keyword matches are not treated as leads.
+still stored but raw keyword matches are not treated as leads. Primovezo delivery is
+restricted to posts written in Latvian; non-Latvian posts are kept as stored mentions
+but cannot qualify for the Primovezo lead digest.
 
 For Primovezo, Resend is an **internal notification channel only**. The runner does not
 send email or social messages to prospects. It scans every keyword first, de-duplicates
@@ -176,13 +178,25 @@ De-duplicated qualified leads can be reviewed across the **current ecommerce
 profile** with:
 
 ```bash
+harken logs
+harken logs --min-score 80
+
+# The longer equivalent remains available:
 harken leads report
-harken leads report --min-score 80
 ```
 
 If one Bluesky post matches several ecommerce keywords, the report shows it once,
 keeps the strongest classification, and lists every matching active-profile keyword.
 Historical website/community experiments are excluded from this Primovezo report.
+
+After tightening classification rules, existing stored mentions can be reclassified
+without fetching social networks again:
+
+```bash
+harken leads reclassify
+```
+
+This updates the stored lead analysis only and does not send a digest by itself.
 
 A typical daily production flow is simply one scheduled invocation:
 
