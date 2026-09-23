@@ -19,6 +19,7 @@ class _Provider:
         return json.dumps(
             {
                 record["id"]: {
+                    "market_lv": True,
                     "relevant": "need" in record["text"].lower(),
                     "score": 92 if "need" in record["text"].lower() else 10,
                     "category": "ecommerce" if "need" in record["text"].lower() else "other",
@@ -71,6 +72,7 @@ def test_classifier_prompt_limits_primovezo_to_ecommerce():
             return json.dumps(
                 {
                     record["id"]: {
+                        "market_lv": True,
                         "relevant": False,
                         "score": 0,
                         "category": "other",
@@ -87,6 +89,39 @@ def test_classifier_prompt_limits_primovezo_to_ecommerce():
     assert "Website work by itself is NOT relevant" in prompt
     assert "Do NOT offer WordPress work" in prompt
     assert "ecommerce platform" in prompt
+    assert "market_lv" in prompt
+    assert "Latvian-language posts qualify for the market" in prompt
+    assert "Russian- or English-language posts qualify only" in prompt
+    assert "Do not translate a foreign post" in prompt
+
+
+def test_classifier_forces_non_latvia_post_irrelevant():
+    class ForeignProvider:
+        available = True
+
+        def complete(self, prompt, system=None, max_tokens=1024):
+            records = json.loads(prompt.split("\n\n")[-1])
+            return json.dumps(
+                {
+                    record["id"]: {
+                        "market_lv": False,
+                        "relevant": True,
+                        "score": 85,
+                        "category": "ecommerce",
+                        "reason_lv": "Autors meklē Etsy alternatīvu.",
+                        "reply_lv": "Apskatiet Primovezo.",
+                    }
+                    for record in records
+                }
+            )
+
+    mention = _mention("Bueno pues a buscar una alternativa a etsy 🙂")
+    classify_leads([mention], ForeignProvider())
+
+    assert mention.lead_relevant is False
+    assert mention.lead_score == 49
+    assert mention.lead_category == "other"
+    assert mention.suggested_reply == ""
 
 
 def test_classify_leads_rejects_incomplete_provider_response():
