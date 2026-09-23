@@ -29,6 +29,7 @@ from harken.auth import ROLES, hash_password, validate_password, validate_role, 
 from harken.config import Config
 from harken.evaluate import evaluate_sentiment, load_sentiment_dataset
 from harken.lead_profiles import PRIMOVEZO_LEAD_KEYWORDS
+from harken.llm import get_provider
 from harken.models import Mention, Sentiment
 from harken.observability import configure_logging
 from harken.pipeline import Pipeline
@@ -235,7 +236,7 @@ def watch(
                     )
                 if result.sentiment_error:
                     console.print(f"  [yellow]![/yellow] sentiment: {result.sentiment_error}")
-                _print_alert_result(result)
+                _print_alert_result(result, lead_mode=True)
                 console.print(
                     f"[green]✓[/green] scan {completed}: {result.fetched} fetched · "
                     f"[bold]{result.new}[/bold] new"
@@ -275,6 +276,18 @@ def leads_primovezo(
             "Primovezo lead scanning requires HARKEN_LEAD_LLM_PROVIDER.",
             param_hint="HARKEN_LEAD_LLM_PROVIDER",
         )
+    try:
+        provider = get_provider(cfg.lead_llm_provider)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="HARKEN_LEAD_LLM_PROVIDER") from exc
+    if not getattr(provider, "available", False):
+        raise typer.BadParameter(
+            "The configured lead LLM provider has no usable credentials.",
+            param_hint="HARKEN_LEAD_LLM_PROVIDER",
+        )
+    # A focused sales runner must never turn an LLM outage into a burst of raw
+    # keyword notifications. Mentions are still stored; only delivery is strict.
+    cfg.lead_fallback_alerts = False
 
     keywords = PRIMOVEZO_LEAD_KEYWORDS
     console.print(
@@ -291,9 +304,10 @@ def leads_primovezo(
             "qualified leads will be stored but not pushed."
         )
 
-    rows: list[tuple[str, str, int, int, int, str, int]] = []
+    rows: list[tuple[str, str, int, int, int, str, int, int]] = []
     total_fetched = 0
     total_new = 0
+    total_leads = 0
     total_alerted = 0
     failed_keywords = 0
     lead_fallbacks = 0
@@ -310,13 +324,13 @@ def leads_primovezo(
                 raise
             except Exception as exc:
                 failed_keywords += 1
-                rows.append((group, query, 0, 0, 0, f"error: {type(exc).__name__}", 0))
+                rows.append((group, query, 0, 0, 0, f"error: {type(exc).__name__}", 0, 0))
                 console.print(f"  [red]✗[/red] {type(exc).__name__}: {exc}")
             else:
                 for source, err in result.errors.items():
                     console.print(f"  [yellow]![/yellow] {source}: {err}")
                 _print_retries(result)
-                _print_alert_result(result)
+                _print_alert_result(result, lead_mode=True)
 
                 source_count = len({name for name in cfg.sources if name.strip()})
                 if source_count and len(result.errors) == source_count:
@@ -341,11 +355,13 @@ def leads_primovezo(
                         result.new,
                         retries,
                         ai_state,
+                        result.lead_candidates,
                         result.alerted,
                     )
                 )
                 total_fetched += result.fetched
                 total_new += result.new
+                total_leads += result.lead_candidates
                 total_alerted += result.alerted
 
             if index < len(keywords) and delay:
@@ -363,8 +379,9 @@ def leads_primovezo(
     table.add_column("new", justify="right")
     table.add_column("retries", justify="right")
     table.add_column("AI")
+    table.add_column("leads", justify="right")
     table.add_column("alerts", justify="right")
-    for group, query, fetched, new, retries, ai_state, alerted in rows:
+    for group, query, fetched, new, retries, ai_state, leads, alerted in rows:
         table.add_row(
             group,
             query,
@@ -372,12 +389,14 @@ def leads_primovezo(
             str(new),
             str(retries),
             ai_state,
+            str(leads),
             str(alerted),
         )
     console.print(table)
     console.print(
         f"[green]✓[/green] {total_fetched} fetched · [bold]{total_new}[/bold] new · "
-        f"{total_alerted} delivered alert(s) · {lead_fallbacks} classifier fallback(s)"
+        f"{total_leads} qualified lead(s) · {total_alerted} delivered alert(s) · "
+        f"{lead_fallbacks} classifier fallback(s)"
     )
     console.print(f"Database: [cyan]{cfg.db_path}[/cyan]")
 
@@ -974,9 +993,10 @@ def _email_settings(config: Config) -> EmailSettings | None:
     )
 
 
-def _print_alert_result(result) -> None:
+def _print_alert_result(result, *, lead_mode: bool = False) -> None:
     if result.alerted:
-        console.print(f"  [green]↗[/green] delivered {result.alerted} negative-mention alerts")
+        label = "lead" if lead_mode else "negative-mention"
+        console.print(f"  [green]↗[/green] delivered {result.alerted} {label} alerts")
     if result.alert_error:
         pending_count = result.alert_pending + result.threshold_pending
         pending = f" ({pending_count} queued for retry)" if pending_count else ""
