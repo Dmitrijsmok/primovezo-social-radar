@@ -123,11 +123,12 @@ Run the whole profile with one command:
 harken leads primovezo
 ```
 
-The runner scans 18 ecommerce, website, community-management, and automation
-queries. It enables lead mode automatically, uses Bluesky by default, and waits
-5 seconds between keywords to reduce burst throttling. Source-level retry/backoff
-still applies if Bluesky temporarily returns 403. Override the source set when
-additional configured sources are available:
+The runner scans a focused ecommerce-only Latvian intent profile. Website-only,
+WordPress-only, community-management, accounting, and generic automation requests
+are intentionally outside the Primovezo profile. It enables lead mode automatically,
+uses Bluesky by default, and waits 5 seconds between keywords to reduce burst
+throttling. Source-level retry/backoff still applies if Bluesky temporarily returns
+403. Override the source set when additional configured sources are available:
 
 ```bash
 harken leads primovezo --sources bluesky,threads
@@ -140,28 +141,38 @@ stored but raw keyword matches are **not** sent as sales leads. If neither email
 webhook delivery is configured, qualified leads are still classified and stored
 locally, and the runner prints a warning rather than discarding them.
 
-The current built-in profile covers queries such as:
+The current built-in profile covers ecommerce-intent queries such as:
 
 ```text
 meklēju interneta veikalu
 vajag interneta veikalu
 interneta veikala izstrāde
+interneta veikala izveide
 e-veikala izstrāde
+e-veikala izveide
+meklēju e-komercijas platformu
 e-komercijas platforma
+e-komercijas risinājums
 Shopify alternatīva
 WooCommerce alternatīva
-meklēju mājaslapas izstrādātāju
-vajag mājaslapu
-mājaslapas izstrāde
-mājaslapas uzturēšana
-mājaslapas pārtaisīšana
-apsaimniekošanas programma
-namu apsaimniekošanas programma
-iedzīvotāju portāls
-dzīvokļu īpašnieku biedrība
-Bill.me alternatīva
-rēķinu automatizācija
+migrācija no Shopify
+migrācija no WooCommerce
 ```
+
+A mixed post can still qualify when it also mentions website work, but the classifier
+must score it only for its ecommerce requirement. Suggested replies must not offer
+WordPress or general website-development services, and must not claim a third-party
+integration unless that capability is actually known.
+
+De-duplicated qualified leads can be reviewed across overlapping keywords with:
+
+```bash
+harken leads report
+harken leads report --min-score 80
+```
+
+If one Bluesky post matches several keywords, the report shows it once, keeps the
+strongest classification, and lists every matched keyword.
 
 Threads uses Meta's official keyword-search API and requires a user access token
 with the `threads_keyword_search` permission. The access token is sent in the
@@ -203,7 +214,7 @@ Set `HARKEN_WEBHOOK_URL` to a generic HTTP endpoint or Slack incoming webhook to
 
 Delivery state is kept in SQLite independently for each target: successful alerts are de-duplicated and failed alerts remain queued for the next scan. Webhook URLs and SMTP passwords are treated as secrets and never stored in alert target identifiers or error messages.
 
-Run `harken test-alert` to verify a configured webhook, or `harken test-alert --transport email` to send one clearly marked synthetic email without waiting for a real mention. Add `--kind volume` or `--kind sentiment` to test threshold notifications.
+Run `harken test-alert` to verify a configured webhook, or `harken test-alert --transport email` to send one clearly marked synthetic email without waiting for a real mention. For the Primovezo lead-email format, run `harken test-alert --transport email --kind lead`. Add `--kind volume` or `--kind sentiment` to test threshold notifications.
 
 Optional volume and sentiment thresholds use every configured durable alert transport. They are disabled until explicitly configured:
 
