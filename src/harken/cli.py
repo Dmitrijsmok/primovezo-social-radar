@@ -456,8 +456,13 @@ def leads_report(
     db: str = typer.Option(None, help="Database path (default: harken.db)."),
 ):
     """Show de-duplicated qualified ecommerce leads across all tracked keywords."""
+    active_queries = [query for _, query in PRIMOVEZO_LEAD_KEYWORDS]
     with Store(db or Config().db_path) as store:
-        leads = store.unique_leads(min_score=min_score, limit=limit)
+        leads = store.unique_leads(
+            min_score=min_score,
+            limit=limit,
+            queries=active_queries,
+        )
 
     if not leads:
         console.print(f"No unique leads found with score >= {min_score}.")
