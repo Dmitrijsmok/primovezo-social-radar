@@ -10,9 +10,6 @@ from harken.models import Mention
 
 _ALLOWED_CATEGORIES = {
     "ecommerce",
-    "website",
-    "community-management",
-    "automation",
     "other",
 }
 
