@@ -148,6 +148,9 @@ class Config:
         default_factory=lambda: _bool_env("HARKEN_LEAD_FALLBACK_ALERTS", True)
     )
     # source-specific options
+    bluesky_lang: str | None = field(
+        default_factory=lambda: (os.getenv("HARKEN_BLUESKY_LANG") or "").strip() or None
+    )
     mastodon_instance: str = field(
         default_factory=lambda: os.getenv("HARKEN_MASTODON_INSTANCE", "mastodon.social")
     )
@@ -265,6 +268,8 @@ class Config:
             )
 
     def source_options(self, name: str) -> dict:
+        if name == "bluesky":
+            return {"lang": self.bluesky_lang}
         if name == "mastodon":
             return {
                 "instance": self.mastodon_instance,
