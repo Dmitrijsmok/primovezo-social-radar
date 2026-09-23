@@ -297,6 +297,12 @@ def leads_primovezo(
     # keyword notifications. Mentions are still stored; only delivery is strict.
     cfg.lead_fallback_alerts = False
 
+    # Public Bluesky search intermittently returns transient 403s from datacenter
+    # IPs. Daily production scans favor completeness over speed: 3 retries with
+    # a 10s exponential base yields 10s, 20s, 40s for a Bluesky 403.
+    cfg.source_retries = max(cfg.source_retries, 3)
+    cfg.retry_backoff = max(cfg.retry_backoff, 10.0)
+
     # Primovezo delivery is an internal once-per-run digest, never outbound
     # contact to the social author. Prefer Resend when configured; keep SMTP as
     # a backwards-compatible fallback for general Harken deployments.
@@ -357,9 +363,12 @@ def leads_primovezo(
                 _print_retries(result)
 
                 source_count = len({name for name in scan_cfg.sources if name.strip()})
-                if source_count and len(result.errors) == source_count:
+                source_failed = bool(source_count and len(result.errors) == source_count)
+                if source_failed:
                     failed_keywords += 1
-                if result.lead_analysis_error:
+                if source_failed:
+                    ai_state = "source error"
+                elif result.lead_analysis_error:
                     lead_fallbacks += 1
                     console.print(
                         f"  [yellow]![/yellow] lead classifier: {result.lead_analysis_error}"
@@ -453,7 +462,7 @@ def leads_primovezo(
     console.print(
         f"[green]✓[/green] {total_fetched} fetched · [bold]{total_new}[/bold] new · "
         f"{total_leads} qualified match(es) · {unique_leads} unique new lead(s) · "
-        f"{lead_fallbacks} classifier fallback(s)"
+        f"{lead_fallbacks} classifier fallback(s) · {failed_keywords} keyword scan failure(s)"
     )
     if digest_resend is not None or digest_email is not None:
         if digest_error:
