@@ -54,6 +54,7 @@ class TrackResult:
     themes: list[Theme] = field(default_factory=list)
     sentiment_error: str | None = None
     lead_analysis_error: str | None = None
+    lead_candidates: int = 0
     analysis_error: str | None = None
     alerted: int = 0
     alert_pending: int = 0
@@ -194,9 +195,10 @@ class Pipeline:
             # backfill does not unexpectedly consume an LLM quota.
             result.lead_analysis_error = self._analyze_leads(new_mentions)
             if result.lead_analysis_error:
-                # Never create a blind spot because an AI provider is down or
-                # misconfigured. Raw keyword matches are still delivered.
-                alert_mentions = new_mentions
+                # General Harken keeps its fail-open default so monitoring does
+                # not silently go blind. Focused production runners may opt out
+                # to avoid sending unclassified keyword matches as sales leads.
+                alert_mentions = new_mentions if self.config.lead_fallback_alerts else []
             else:
                 alert_mentions = [
                     mention
@@ -204,6 +206,7 @@ class Pipeline:
                     if mention.lead_relevant
                     and (mention.lead_score or 0) >= self.config.lead_min_score
                 ]
+                result.lead_candidates = len(alert_mentions)
         else:
             alert_mentions = [
                 mention for mention in new_mentions if mention.sentiment is Sentiment.NEGATIVE
