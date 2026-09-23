@@ -291,6 +291,8 @@ def leads_primovezo(
             param_hint="--sources",
         )
     cfg.lead_enabled = True
+    if "bluesky" in cfg.sources:
+        cfg.bluesky_lang = "lv"
     if cfg.lead_llm_provider.strip().lower() in {"", "none", "null"}:
         raise typer.BadParameter(
             "Primovezo lead scanning requires HARKEN_LEAD_LLM_PROVIDER.",
@@ -492,6 +494,113 @@ def leads_primovezo(
 
     if failed_keywords == len(keywords):
         raise typer.Exit(1)
+
+
+@lead_app.command("recent")
+def leads_recent(
+    days: int = typer.Option(5, min=1, max=30, help="How many recent days to scan."),
+    limit: int = typer.Option(100, min=1, max=100, help="Results per Bluesky page."),
+    pages: int = typer.Option(5, min=1, max=20, help="Maximum pages per keyword."),
+    delay: float = typer.Option(
+        5.0,
+        min=0.0,
+        max=300.0,
+        help="Seconds to wait between keywords to avoid source burst throttling.",
+    ),
+    db: str = typer.Option(None, help="Database path (default: harken.db)."),
+):
+    """Scan a recent Latvian Bluesky window without changing the daily cursor or sending email."""
+    cfg = _tracking_config("bluesky", limit, db)
+    cfg.lead_enabled = True
+    cfg.lead_fallback_alerts = False
+    cfg.bluesky_lang = "lv"
+    cfg.source_retries = max(cfg.source_retries, 3)
+    cfg.retry_backoff = max(cfg.retry_backoff, 10.0)
+
+    if cfg.lead_llm_provider.strip().lower() in {"", "none", "null"}:
+        raise typer.BadParameter(
+            "Recent Primovezo scanning requires HARKEN_LEAD_LLM_PROVIDER.",
+            param_hint="HARKEN_LEAD_LLM_PROVIDER",
+        )
+    try:
+        provider = get_provider(cfg.lead_llm_provider)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="HARKEN_LEAD_LLM_PROVIDER") from exc
+    if not getattr(provider, "available", False):
+        raise typer.BadParameter(
+            "The configured lead LLM provider has no usable credentials.",
+            param_hint="HARKEN_LEAD_LLM_PROVIDER",
+        )
+
+    scan_cfg = replace(
+        cfg,
+        email_to=[],
+        email_from=None,
+        smtp_host=None,
+        smtp_username=None,
+        smtp_password=None,
+        resend_api_key=None,
+        resend_to=[],
+        webhook_url=None,
+    )
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    console.print(
+        Panel.fit(
+            f"[bold]Primovezo recent scan[/bold]\n"
+            f"last {days} day(s) · Latvian posts · Bluesky · "
+            f"{len(PRIMOVEZO_LEAD_KEYWORDS)} intent keywords",
+            border_style="cyan",
+        )
+    )
+
+    total_fetched = 0
+    total_new = 0
+    total_leads = 0
+    failed_keywords = 0
+    pipe = Pipeline(scan_cfg)
+    try:
+        for index, (group, query) in enumerate(PRIMOVEZO_LEAD_KEYWORDS, start=1):
+            console.print(
+                f"[dim]{index}/{len(PRIMOVEZO_LEAD_KEYWORDS)}[/dim] "
+                f"[bold]{group}[/bold] · “{query}”"
+            )
+            result = pipe.track(
+                query,
+                pages=pages,
+                since_override=cutoff,
+                classify_fetched=True,
+                update_source_state=False,
+            )
+            for source, err in result.errors.items():
+                console.print(f"  [yellow]![/yellow] {source}: {err}")
+            _print_retries(result)
+            if result.errors:
+                failed_keywords += 1
+            if result.lead_analysis_error:
+                console.print(
+                    f"  [yellow]![/yellow] lead classifier: {result.lead_analysis_error}"
+                )
+            console.print(
+                f"  {result.fetched} fetched · {result.new} new · "
+                f"{result.lead_candidates} qualified"
+            )
+            total_fetched += result.fetched
+            total_new += result.new
+            total_leads += result.lead_candidates
+            if index < len(PRIMOVEZO_LEAD_KEYWORDS) and delay:
+                time.sleep(delay)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Recent scan stopped.[/dim]")
+        raise typer.Exit(130) from None
+    finally:
+        pipe.close()
+
+    console.print(
+        f"[green]✓[/green] recent {days}-day scan: {total_fetched} fetched · "
+        f"[bold]{total_new}[/bold] new · {total_leads} qualified match(es) · "
+        f"{failed_keywords} keyword scan failure(s)"
+    )
+    console.print("[dim]No email was sent. Review results with: harken logs[/dim]")
 
 
 @lead_app.command("report")
