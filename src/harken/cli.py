@@ -314,10 +314,7 @@ def leads_primovezo(
     pipe = Pipeline(cfg)
     try:
         for index, (group, query) in enumerate(keywords, start=1):
-            console.print(
-                f"[dim]{index}/{len(keywords)}[/dim] "
-                f"[bold]{group}[/bold] · “{query}”"
-            )
+            console.print(f"[dim]{index}/{len(keywords)}[/dim] [bold]{group}[/bold] · “{query}”")
             try:
                 result = pipe.track(query, pages=pages)
             except KeyboardInterrupt:
