@@ -51,8 +51,7 @@ def classify_leads(mentions: list[Mention], provider: LLMProvider) -> None:
             "reason_lv and reply_lv must be in Latvian. For irrelevant posts reply_lv should be "
             "an empty string. For relevant posts, reply to the actual problem described by the "
             "author, avoid invented facts and aggressive advertising, and mention Primovezo only "
-            "when contextually appropriate.\n\n"
-            + json.dumps(records, ensure_ascii=False)
+            "when contextually appropriate.\n\n" + json.dumps(records, ensure_ascii=False)
         )
         raw = provider.complete(
             prompt,
