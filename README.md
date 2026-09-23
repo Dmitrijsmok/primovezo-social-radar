@@ -7,7 +7,7 @@
 Track a keyword, brand, or product across Hacker News, Reddit, Mastodon, Bluesky, Stack Overflow, RSS, Threads, X, and YouTube.
 Get sentiment and themes in a clean local dashboard. No Harken account, telemetry, or per-seat pricing — the database stays on your machine.
 
-[![CI](https://github.com/VladUZH/harken/actions/workflows/ci.yml/badge.svg)](https://github.com/VladUZH/harken/actions/workflows/ci.yml)
+[![CI](https://github.com/Dmitrijsmok/primovezo-social-radar/actions/workflows/ci.yml/badge.svg)](https://github.com/Dmitrijsmok/primovezo-social-radar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-4ec9b0.svg)](https://www.python.org/)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-d8a657.svg)](#contributing)
@@ -19,6 +19,9 @@ Get sentiment and themes in a clean local dashboard. No Harken account, telemetr
 </div>
 
 ---
+
+> **Primovezo fork:** keeps Harken's MIT-licensed social-listening core and adds
+> Threads keyword search plus an optional commercial lead-radar workflow.
 
 ## Why Harken
 
@@ -59,8 +62,8 @@ Harken is the small, honest, self-hosted version: point it at a keyword, and it 
 Requires Python 3.10+. (Examples use [`uv`](https://github.com/astral-sh/uv); plain `pip` works too.)
 
 ```bash
-git clone https://github.com/VladUZH/harken
-cd harken
+git clone https://github.com/Dmitrijsmok/primovezo-social-radar
+cd primovezo-social-radar
 uv venv && uv pip install -e .
 
 # 1. See the whole thing on bundled sample data — no key, no network:
