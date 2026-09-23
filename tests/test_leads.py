@@ -22,8 +22,16 @@ class _Provider:
                     "relevant": "need" in record["text"].lower(),
                     "score": 92 if "need" in record["text"].lower() else 10,
                     "category": "ecommerce" if "need" in record["text"].lower() else "other",
-                    "reason_lv": "Aktīvs pieprasījums" if "need" in record["text"].lower() else "Nav pirkšanas nolūka",
-                    "reply_lv": "Varu parādīt piemērotu variantu." if "need" in record["text"].lower() else "",
+                    "reason_lv": (
+                        "Aktīvs pieprasījums"
+                        if "need" in record["text"].lower()
+                        else "Nav pirkšanas nolūka"
+                    ),
+                    "reply_lv": (
+                        "Varu parādīt piemērotu variantu."
+                        if "need" in record["text"].lower()
+                        else ""
+                    ),
                 }
                 for record in records
             }
