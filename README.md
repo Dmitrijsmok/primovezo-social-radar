@@ -205,9 +205,12 @@ harken leads recent --days 5
 harken logs
 ```
 
-The recent scan uses Bluesky's time boundary and Latvian-language filter, stores and
-classifies matching posts, does not move the daily incremental cursor, and does not
-send email.
+The recent scan deliberately uses broader discovery terms such as `Shopify`,
+`WooCommerce`, `Etsy`, `interneta veikals`, and `e-komercija`. The classifier
+keeps both direct commercial leads and useful Latvian ecommerce conversations where a
+light-touch Primovezo mention would be relevant. It uses Bluesky's time boundary and
+Latvian-language filter, stores and classifies matching posts, does not move the daily
+incremental cursor, and does not send email.
 
 A typical daily production flow is simply one scheduled invocation:
 
