@@ -156,6 +156,15 @@ def send_lead_email(settings: EmailSettings, query: str, mentions: list[Mention]
     _deliver_email(settings, subject, _lead_alert_text(query, mentions))
 
 
+def send_lead_digest_email(settings: EmailSettings, mentions: list[Mention]) -> None:
+    """Deliver one internal Primovezo digest of qualified ecommerce leads."""
+    if not mentions:
+        return
+    count = len(mentions)
+    subject = f"[Primovezo Social Radar] {count} new ecommerce lead{'s' if count != 1 else ''}"
+    _deliver_email(settings, subject, _lead_alert_text("daily ecommerce scan", mentions))
+
+
 def send_threshold_email(settings: EmailSettings, text: str, payload: dict) -> None:
     """Deliver a persisted volume/sentiment threshold episode by email."""
     event = str(payload.get("event", "harken.threshold_alert")).removeprefix("harken.")
@@ -294,7 +303,7 @@ def _lead_alert_text(query: str, mentions: list[Mention]) -> str:
                 ]
             )
             if mention.suggested_reply:
-                lines.append(f"  Suggested reply: {mention.suggested_reply}")
+                lines.append(f"  Draft reply (not sent automatically): {mention.suggested_reply}")
         if mention.url:
             lines.append(f"  Open: {mention.url}")
     if count > 10:

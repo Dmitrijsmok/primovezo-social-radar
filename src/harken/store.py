@@ -686,6 +686,96 @@ class Store:
         value["relevant"] = bool(value["relevant"])
         return value
 
+    def unique_leads(
+        self,
+        min_score: int = 70,
+        limit: int = 100,
+        queries: list[str] | None = None,
+    ) -> list[dict]:
+        """Return de-duplicated qualified leads, keeping the strongest classification."""
+        if not 0 <= min_score <= 100:
+            raise ValueError("min_score must be between 0 and 100")
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+
+        selected_queries = list(
+            dict.fromkeys(query.strip() for query in queries or [] if query.strip())
+        )
+        where = "WHERE l.relevant = 1"
+        args: list = []
+        if queries is not None:
+            if not selected_queries:
+                return []
+            placeholders = ",".join("?" for _ in selected_queries)
+            where += f" AND m.query IN ({placeholders})"
+            args.extend(selected_queries)
+
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    m.source,
+                    m.id,
+                    m.query,
+                    m.author,
+                    m.title,
+                    m.text,
+                    m.url,
+                    m.created_at,
+                    l.score,
+                    l.category,
+                    l.reason,
+                    l.suggested_reply,
+                    l.analyzed_at
+                FROM lead_analysis AS l
+                JOIN mentions AS m
+                  ON m.id = l.mention_id
+                 AND m.query = l.query
+                {where}
+                ORDER BY
+                    l.score DESC,
+                    l.analyzed_at DESC,
+                    m.created_at DESC,
+                    m.source,
+                    m.id,
+                    m.query COLLATE NOCASE
+                """,
+                args,
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+
+        grouped: dict[tuple[str, str], dict] = {}
+        for row in rows:
+            key = (row["source"], row["id"])
+            existing = grouped.get(key)
+            if existing is None:
+                existing = {
+                    "source": row["source"],
+                    "id": row["id"],
+                    "author": row["author"],
+                    "title": row["title"],
+                    "text": row["text"],
+                    "url": row["url"],
+                    "created_at": row["created_at"],
+                    "score": row["score"],
+                    "category": row["category"],
+                    "reason": row["reason"],
+                    "suggested_reply": row["suggested_reply"],
+                    "best_query": row["query"],
+                    "matched_queries": [],
+                    "analyzed_at": row["analyzed_at"],
+                }
+                grouped[key] = existing
+            if row["query"] not in existing["matched_queries"]:
+                existing["matched_queries"].append(row["query"])
+
+        qualified = [lead for lead in grouped.values() if lead["score"] >= min_score]
+        qualified.sort(
+            key=lambda lead: (lead["score"], lead["analyzed_at"], lead["created_at"]),
+            reverse=True,
+        )
+        return qualified[:limit]
+
     def save_tracking(
         self, query: str, sources: list[str], *, project_id: int | None = None
     ) -> None:
@@ -1042,6 +1132,31 @@ class Store:
                 LIMIT ?
                 """,
                 (query, target_key, limit),
+            )
+            return [_row_to_mention(row) for row in cur.fetchall()]
+
+    def pending_alerts_for_target(self, target_key: str, limit: int = 100) -> list[Mention]:
+        """Return undelivered mentions across queries for one delivery target."""
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(
+                """
+                SELECT m.*,
+                       l.relevant AS lead_relevant,
+                       l.score AS lead_score,
+                       l.category AS lead_category,
+                       l.reason AS lead_reason,
+                       l.suggested_reply AS suggested_reply
+                FROM alert_outbox AS a
+                JOIN mentions AS m ON m.query = a.query AND m.id = a.mention_id
+                LEFT JOIN lead_analysis AS l
+                  ON l.query = m.query AND l.mention_id = m.id
+                WHERE a.target_key = ? AND a.delivered_at IS NULL
+                ORDER BY a.enqueued_at, a.mention_id
+                LIMIT ?
+                """,
+                (target_key, limit),
             )
             return [_row_to_mention(row) for row in cur.fetchall()]
 

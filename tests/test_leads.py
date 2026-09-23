@@ -59,6 +59,36 @@ def test_classify_leads_sets_relevance_score_reason_and_reply():
     assert mention.suggested_reply == "Varu parādīt piemērotu variantu."
 
 
+def test_classifier_prompt_limits_primovezo_to_ecommerce():
+    captured = {}
+
+    class CapturingProvider:
+        available = True
+
+        def complete(self, prompt, system=None, max_tokens=1024):
+            captured["prompt"] = prompt
+            records = json.loads(prompt.split("\n\n")[-1])
+            return json.dumps(
+                {
+                    record["id"]: {
+                        "relevant": False,
+                        "score": 0,
+                        "category": "other",
+                        "reason_lv": "Nav e-komercijas pieprasījuma",
+                        "reply_lv": "",
+                    }
+                    for record in records
+                }
+            )
+
+    classify_leads([_mention("Need WordPress maintenance only")], CapturingProvider())
+
+    prompt = captured["prompt"]
+    assert "Website work by itself is NOT relevant" in prompt
+    assert "Do NOT offer WordPress work" in prompt
+    assert "ecommerce platform" in prompt
+
+
 def test_classify_leads_rejects_incomplete_provider_response():
     class IncompleteProvider:
         available = True

@@ -7,6 +7,8 @@ import io
 import json
 import sqlite3
 import time
+from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,6 +20,9 @@ from rich.table import Table
 from harken import __version__
 from harken.alerts import (
     EmailSettings,
+    email_target_key,
+    send_lead_alert,
+    send_lead_digest_email,
     send_negative_alert,
     send_negative_email,
     send_threshold_alert,
@@ -289,6 +294,19 @@ def leads_primovezo(
     # keyword notifications. Mentions are still stored; only delivery is strict.
     cfg.lead_fallback_alerts = False
 
+    # Primovezo email is an internal once-per-run digest, never outbound contact
+    # to the social author. Disable per-keyword transports during the scan.
+    digest_email = _email_settings(cfg)
+    scan_cfg = replace(
+        cfg,
+        email_to=[],
+        email_from=None,
+        smtp_host=None,
+        smtp_username=None,
+        smtp_password=None,
+        webhook_url=None,
+    )
+
     keywords = PRIMOVEZO_LEAD_KEYWORDS
     console.print(
         Panel.fit(
@@ -298,20 +316,23 @@ def leads_primovezo(
             border_style="cyan",
         )
     )
-    if not cfg.email_to and not cfg.webhook_url:
+    if digest_email is None:
         console.print(
-            "[yellow]![/yellow] No email/webhook transport configured; "
-            "qualified leads will be stored but not pushed."
+            "[yellow]![/yellow] No internal email configured; "
+            "qualified leads will be stored but no daily digest will be sent."
         )
 
-    rows: list[tuple[str, str, int, int, int, str, int, int]] = []
+    rows: list[tuple[str, str, int, int, int, str, int]] = []
     total_fetched = 0
     total_new = 0
     total_leads = 0
-    total_alerted = 0
+    candidate_mentions: list[Mention] = []
+    digest_delivered = 0
+    digest_pending = 0
+    digest_error: str | None = None
     failed_keywords = 0
     lead_fallbacks = 0
-    pipe = Pipeline(cfg)
+    pipe = Pipeline(scan_cfg)
     try:
         for index, (group, query) in enumerate(keywords, start=1):
             console.print(f"[dim]{index}/{len(keywords)}[/dim] [bold]{group}[/bold] · “{query}”")
@@ -321,15 +342,14 @@ def leads_primovezo(
                 raise
             except Exception as exc:
                 failed_keywords += 1
-                rows.append((group, query, 0, 0, 0, f"error: {type(exc).__name__}", 0, 0))
+                rows.append((group, query, 0, 0, 0, f"error: {type(exc).__name__}", 0))
                 console.print(f"  [red]✗[/red] {type(exc).__name__}: {exc}")
             else:
                 for source, err in result.errors.items():
                     console.print(f"  [yellow]![/yellow] {source}: {err}")
                 _print_retries(result)
-                _print_alert_result(result, lead_mode=True)
 
-                source_count = len({name for name in cfg.sources if name.strip()})
+                source_count = len({name for name in scan_cfg.sources if name.strip()})
                 if source_count and len(result.errors) == source_count:
                     failed_keywords += 1
                 if result.lead_analysis_error:
@@ -353,16 +373,40 @@ def leads_primovezo(
                         retries,
                         ai_state,
                         result.lead_candidates,
-                        result.alerted,
                     )
                 )
                 total_fetched += result.fetched
                 total_new += result.new
                 total_leads += result.lead_candidates
-                total_alerted += result.alerted
+                candidate_mentions.extend(result.lead_candidate_mentions)
 
             if index < len(keywords) and delay:
                 time.sleep(delay)
+
+        if digest_email is not None:
+            target_key = "lead-" + email_target_key(digest_email)
+            pipe.store.enqueue_alerts(
+                candidate_mentions,
+                target_key,
+                dedupe_across_queries=True,
+            )
+            pending = pipe.store.pending_alerts_for_target(target_key, limit=100)
+            digest_pending = len(pending)
+            if pending:
+                grouped: dict[str, list[str]] = defaultdict(list)
+                for mention in pending:
+                    grouped[mention.query].append(mention.id)
+                try:
+                    send_lead_digest_email(digest_email, pending)
+                except Exception as exc:
+                    digest_error = f"{type(exc).__name__}: {exc}"
+                    for query, ids in grouped.items():
+                        pipe.store.mark_alerts_failed(query, ids, target_key, digest_error)
+                else:
+                    for query, ids in grouped.items():
+                        pipe.store.mark_alerts_delivered(query, ids, target_key)
+                    digest_delivered = len(pending)
+                    digest_pending = 0
     except KeyboardInterrupt:
         console.print("\n[dim]Primovezo lead scan stopped.[/dim]")
         raise typer.Exit(130) from None
@@ -377,8 +421,7 @@ def leads_primovezo(
     table.add_column("retries", justify="right")
     table.add_column("AI")
     table.add_column("leads", justify="right")
-    table.add_column("alerts", justify="right")
-    for group, query, fetched, new, retries, ai_state, leads, alerted in rows:
+    for group, query, fetched, new, retries, ai_state, leads in rows:
         table.add_row(
             group,
             query,
@@ -387,18 +430,81 @@ def leads_primovezo(
             str(retries),
             ai_state,
             str(leads),
-            str(alerted),
         )
     console.print(table)
+    unique_leads = len({(mention.source, mention.id) for mention in candidate_mentions})
     console.print(
         f"[green]✓[/green] {total_fetched} fetched · [bold]{total_new}[/bold] new · "
-        f"{total_leads} qualified lead(s) · {total_alerted} delivered alert(s) · "
+        f"{total_leads} qualified match(es) · {unique_leads} unique new lead(s) · "
         f"{lead_fallbacks} classifier fallback(s)"
     )
+    if digest_email is not None:
+        if digest_error:
+            console.print(
+                f"[yellow]![/yellow] internal lead digest failed: {digest_error} "
+                f"({digest_pending} queued for retry)"
+            )
+        elif digest_delivered:
+            console.print(
+                f"[green]✉[/green] emailed {digest_delivered} lead(s) in one internal digest"
+            )
+        else:
+            console.print("[dim]No new lead digest to send.[/dim]")
     console.print(f"Database: [cyan]{cfg.db_path}[/cyan]")
 
     if failed_keywords == len(keywords):
         raise typer.Exit(1)
+
+
+@lead_app.command("report")
+def leads_report(
+    min_score: int = typer.Option(70, min=0, max=100, help="Minimum lead score to include."),
+    limit: int = typer.Option(50, min=1, max=500, help="Maximum unique leads to show."),
+    db: str = typer.Option(None, help="Database path (default: harken.db)."),
+):
+    """Show de-duplicated qualified ecommerce leads across all tracked keywords."""
+    active_queries = [query for _, query in PRIMOVEZO_LEAD_KEYWORDS]
+    with Store(db or Config().db_path) as store:
+        leads = store.unique_leads(
+            min_score=min_score,
+            limit=limit,
+            queries=active_queries,
+        )
+
+    if not leads:
+        console.print(f"No unique leads found with score >= {min_score}.")
+        return
+
+    console.print(
+        f"[bold]Unique qualified leads: {len(leads)}[/bold] [dim](score >= {min_score})[/dim]"
+    )
+    for index, lead in enumerate(leads, start=1):
+        author = lead["author"] or "unknown"
+        queries = ", ".join(lead["matched_queries"])
+        console.print(
+            Panel(
+                "\n".join(
+                    [
+                        f"[bold]{lead['score']}/100[/bold] · {lead['category']} · "
+                        f"{lead['source']} · {author}",
+                        f"[dim]Matched: {queries}[/dim]",
+                        "",
+                        lead["text"] or lead["title"] or "",
+                        "",
+                        f"[bold]Why:[/bold] {lead['reason']}",
+                        (
+                            f"[bold]Draft reply (not sent automatically):[/bold] "
+                            f"{lead['suggested_reply']}"
+                            if lead["suggested_reply"]
+                            else "[bold]Draft reply (not sent automatically):[/bold] -"
+                        ),
+                        f"[bold]Open:[/bold] {lead['url'] or '-'}",
+                    ]
+                ),
+                title=f"Lead {index}",
+                border_style="green",
+            )
+        )
 
 
 @app.command()
@@ -877,7 +983,9 @@ def test_alert(
     transport: str = typer.Option(
         None, help="Delivery transport: webhook or email (default: configured transport)."
     ),
-    kind: str = typer.Option("negative", help="Synthetic event: negative, volume, or sentiment."),
+    kind: str = typer.Option(
+        "negative", help="Synthetic event: negative, lead, volume, or sentiment."
+    ),
 ):
     """Send one synthetic alert to verify a webhook or SMTP configuration."""
     cfg = Config()
@@ -887,8 +995,10 @@ def test_alert(
     if selected not in {"webhook", "email"}:
         raise typer.BadParameter("transport must be webhook or email", param_hint="--transport")
     kind = kind.strip().lower()
-    if kind not in {"negative", "volume", "sentiment"}:
-        raise typer.BadParameter("kind must be negative, volume, or sentiment", param_hint="--kind")
+    if kind not in {"negative", "lead", "volume", "sentiment"}:
+        raise typer.BadParameter(
+            "kind must be negative, lead, volume, or sentiment", param_hint="--kind"
+        )
 
     url = webhook_url or cfg.webhook_url
     email_settings = _email_settings(cfg) if selected == "email" else None
@@ -902,23 +1012,48 @@ def test_alert(
             param_hint="--transport",
         )
     try:
-        if kind == "negative":
-            mention = Mention(
-                source="harken",
-                query="webhook test",
-                author="Harken",
-                text=(
-                    "This is a synthetic negative-mention alert. "
-                    "Your alert transport is configured correctly."
-                ),
-                created_at=datetime.now(timezone.utc),
-                sentiment=Sentiment.NEGATIVE,
-                sentiment_score=-1.0,
-            )
-            if selected == "webhook":
-                send_negative_alert(url or "", mention.query, [mention])
+        if kind in {"negative", "lead"}:
+            if kind == "lead":
+                mention = Mention(
+                    source="harken",
+                    query="meklēju interneta veikalu",
+                    author="Social Radar test",
+                    text=(
+                        "Meklēju e-komercijas platformu jaunam interneta veikalam. "
+                        "Šis ir sintētisks testa leads."
+                    ),
+                    url="https://example.test/social-radar-lead",
+                    created_at=datetime.now(timezone.utc),
+                    lead_relevant=True,
+                    lead_score=92,
+                    lead_category="ecommerce",
+                    lead_reason="Sintētisks tests e-pasta piegādes pārbaudei.",
+                    suggested_reply=(
+                        "Sveiki! Redzēju, ka meklējat e-komercijas platformu. "
+                        "Ja vēl salīdzināt variantus, varu īsi parādīt Primovezo."
+                    ),
+                )
+                if selected == "webhook":
+                    send_lead_alert(url or "", mention.query, [mention])
+                else:
+                    send_lead_digest_email(email_settings, [mention])
             else:
-                send_negative_email(email_settings, mention.query, [mention])
+                mention = Mention(
+                    source="harken",
+                    query="webhook test",
+                    author="Harken",
+                    text=(
+                        "This is a synthetic negative-mention alert. "
+                        "Your alert transport is configured correctly."
+                    ),
+                    created_at=datetime.now(timezone.utc),
+                    sentiment=Sentiment.NEGATIVE,
+                    sentiment_score=-1.0,
+                )
+                if selected == "webhook":
+                    send_negative_alert(url or "", mention.query, [mention])
+                else:
+                    send_negative_email(email_settings, mention.query, [mention])
         else:
             event = f"harken.{kind}_spike" if kind == "volume" else "harken.sentiment_drop"
             text = f"Harken test: synthetic {kind} threshold alert"

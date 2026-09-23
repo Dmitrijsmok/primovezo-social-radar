@@ -87,6 +87,47 @@ def test_same_mention_can_belong_to_multiple_queries(tmp_path):
     db.close()
 
 
+def test_unique_leads_dedupes_same_post_across_queries_and_keeps_best_score(tmp_path):
+    db = Store(tmp_path / "leads.db")
+    first = mk(
+        "Need an ecommerce platform",
+        source="bluesky",
+        query="interneta veikals",
+        url="https://bsky.app/profile/example/post/1",
+    )
+    second = mk(
+        "Need an ecommerce platform",
+        source="bluesky",
+        query="e-komercijas platforma",
+        url="https://bsky.app/profile/example/post/1",
+    )
+    first.lead_relevant = True
+    first.lead_score = 90
+    first.lead_category = "ecommerce"
+    first.lead_reason = "Pirmais vaicājums"
+    first.suggested_reply = "Pirmais variants"
+    second.lead_relevant = True
+    second.lead_score = 95
+    second.lead_category = "ecommerce"
+    second.lead_reason = "Labākais vaicājums"
+    second.suggested_reply = "Labākais variants"
+
+    db.upsert([first, second])
+    db.save_lead_analysis([first, second])
+
+    leads = db.unique_leads(min_score=70)
+
+    assert len(leads) == 1
+    assert leads[0]["score"] == 95
+    assert leads[0]["reason"] == "Labākais vaicājums"
+    assert leads[0]["suggested_reply"] == "Labākais variants"
+    assert set(leads[0]["matched_queries"]) == {
+        "interneta veikals",
+        "e-komercijas platforma",
+    }
+    db.close()
+
+
 def test_filter_by_sentiment_and_source(tmp_path):
     db = Store(tmp_path / "t.db")
     db.upsert(
@@ -181,6 +222,28 @@ def test_retention_removes_old_mentions_and_matching_alert_state(tmp_path):
     assert db.delete_before(cutoff) == 1
     assert [row.text for row in db.mentions(limit=None)] == ["recent"]
     assert db.pending_alert_count("acme", "target") == 1
+    db.close()
+
+
+def test_pending_alerts_for_target_collects_cross_keyword_leads_once(tmp_path):
+    db = Store(tmp_path / "digest-outbox.db")
+    first = mk("same lead", source="bluesky", query="q1", url="https://x/shared")
+    second = mk("same lead", source="bluesky", query="q2", url="https://x/shared")
+    for mention in (first, second):
+        mention.lead_relevant = True
+        mention.lead_score = 90
+        mention.lead_category = "ecommerce"
+        mention.lead_reason = "Aktīvs pieprasījums"
+    db.upsert([first, second])
+    db.save_lead_analysis([first, second])
+
+    assert db.enqueue_alerts([first], "lead-email-test", dedupe_across_queries=True) == 1
+    assert db.enqueue_alerts([second], "lead-email-test", dedupe_across_queries=True) == 0
+
+    pending = db.pending_alerts_for_target("lead-email-test")
+    assert len(pending) == 1
+    assert pending[0].id == first.id
+    assert pending[0].lead_score == 90
     db.close()
 
 
