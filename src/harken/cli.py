@@ -20,9 +20,12 @@ from rich.table import Table
 from harken import __version__
 from harken.alerts import (
     EmailSettings,
+    ResendSettings,
     email_target_key,
+    resend_target_key,
     send_lead_alert,
     send_lead_digest_email,
+    send_lead_digest_resend,
     send_negative_alert,
     send_negative_email,
     send_threshold_alert,
@@ -294,9 +297,11 @@ def leads_primovezo(
     # keyword notifications. Mentions are still stored; only delivery is strict.
     cfg.lead_fallback_alerts = False
 
-    # Primovezo email is an internal once-per-run digest, never outbound contact
-    # to the social author. Disable per-keyword transports during the scan.
-    digest_email = _email_settings(cfg)
+    # Primovezo delivery is an internal once-per-run digest, never outbound
+    # contact to the social author. Prefer Resend when configured; keep SMTP as
+    # a backwards-compatible fallback for general Harken deployments.
+    digest_resend = _resend_settings(cfg)
+    digest_email = None if digest_resend is not None else _email_settings(cfg)
     scan_cfg = replace(
         cfg,
         email_to=[],
@@ -304,6 +309,8 @@ def leads_primovezo(
         smtp_host=None,
         smtp_username=None,
         smtp_password=None,
+        resend_api_key=None,
+        resend_to=[],
         webhook_url=None,
     )
 
@@ -316,9 +323,9 @@ def leads_primovezo(
             border_style="cyan",
         )
     )
-    if digest_email is None:
+    if digest_resend is None and digest_email is None:
         console.print(
-            "[yellow]![/yellow] No internal email configured; "
+            "[yellow]![/yellow] No internal Resend/SMTP delivery configured; "
             "qualified leads will be stored but no daily digest will be sent."
         )
 
@@ -383,28 +390,38 @@ def leads_primovezo(
             if index < len(keywords) and delay:
                 time.sleep(delay)
 
-        if digest_email is not None:
-            target_key = "lead-" + email_target_key(digest_email)
+        digest_target_key: str | None = None
+        digest_sender = None
+        if digest_resend is not None:
+            digest_target_key = "lead-" + resend_target_key(digest_resend)
+            digest_sender = lambda mentions: send_lead_digest_resend(digest_resend, mentions)
+        elif digest_email is not None:
+            digest_target_key = "lead-" + email_target_key(digest_email)
+            digest_sender = lambda mentions: send_lead_digest_email(digest_email, mentions)
+
+        if digest_target_key is not None and digest_sender is not None:
             pipe.store.enqueue_alerts(
                 candidate_mentions,
-                target_key,
+                digest_target_key,
                 dedupe_across_queries=True,
             )
-            pending = pipe.store.pending_alerts_for_target(target_key, limit=100)
+            pending = pipe.store.pending_alerts_for_target(digest_target_key, limit=100)
             digest_pending = len(pending)
             if pending:
                 grouped: dict[str, list[str]] = defaultdict(list)
                 for mention in pending:
                     grouped[mention.query].append(mention.id)
                 try:
-                    send_lead_digest_email(digest_email, pending)
+                    digest_sender(pending)
                 except Exception as exc:
                     digest_error = f"{type(exc).__name__}: {exc}"
                     for query, ids in grouped.items():
-                        pipe.store.mark_alerts_failed(query, ids, target_key, digest_error)
+                        pipe.store.mark_alerts_failed(
+                            query, ids, digest_target_key, digest_error
+                        )
                 else:
                     for query, ids in grouped.items():
-                        pipe.store.mark_alerts_delivered(query, ids, target_key)
+                        pipe.store.mark_alerts_delivered(query, ids, digest_target_key)
                     digest_delivered = len(pending)
                     digest_pending = 0
     except KeyboardInterrupt:
@@ -438,7 +455,7 @@ def leads_primovezo(
         f"{total_leads} qualified match(es) · {unique_leads} unique new lead(s) · "
         f"{lead_fallbacks} classifier fallback(s)"
     )
-    if digest_email is not None:
+    if digest_resend is not None or digest_email is not None:
         if digest_error:
             console.print(
                 f"[yellow]![/yellow] internal lead digest failed: {digest_error} "
@@ -446,7 +463,7 @@ def leads_primovezo(
             )
         elif digest_delivered:
             console.print(
-                f"[green]✉[/green] emailed {digest_delivered} lead(s) in one internal digest"
+                f"[green]✉[/green] delivered {digest_delivered} lead(s) in one internal digest"
             )
         else:
             console.print("[dim]No new lead digest to send.[/dim]")
@@ -981,19 +998,21 @@ def test_alert(
         None, "--webhook-url", help="Override HARKEN_WEBHOOK_URL for this test."
     ),
     transport: str = typer.Option(
-        None, help="Delivery transport: webhook or email (default: configured transport)."
+        None, help="Delivery transport: webhook, email, or resend."
     ),
     kind: str = typer.Option(
         "negative", help="Synthetic event: negative, lead, volume, or sentiment."
     ),
 ):
-    """Send one synthetic alert to verify a webhook or SMTP configuration."""
+    """Send one synthetic alert to verify webhook, SMTP, or Resend delivery."""
     cfg = Config()
     selected = (
         transport or ("webhook" if webhook_url or cfg.webhook_url or not cfg.email_to else "email")
     ).lower()
-    if selected not in {"webhook", "email"}:
-        raise typer.BadParameter("transport must be webhook or email", param_hint="--transport")
+    if selected not in {"webhook", "email", "resend"}:
+        raise typer.BadParameter(
+            "transport must be webhook, email, or resend", param_hint="--transport"
+        )
     kind = kind.strip().lower()
     if kind not in {"negative", "lead", "volume", "sentiment"}:
         raise typer.BadParameter(
@@ -1002,6 +1021,7 @@ def test_alert(
 
     url = webhook_url or cfg.webhook_url
     email_settings = _email_settings(cfg) if selected == "email" else None
+    resend_settings = _resend_settings(cfg) if selected == "resend" else None
     if selected == "webhook" and not url:
         raise typer.BadParameter(
             "set HARKEN_WEBHOOK_URL or pass --webhook-url", param_hint="--webhook-url"
@@ -1010,6 +1030,16 @@ def test_alert(
         raise typer.BadParameter(
             "configure HARKEN_EMAIL_TO, HARKEN_EMAIL_FROM, and HARKEN_SMTP_HOST",
             param_hint="--transport",
+        )
+    if selected == "resend" and resend_settings is None:
+        raise typer.BadParameter(
+            "configure HARKEN_RESEND_API_KEY and HARKEN_RESEND_TO",
+            param_hint="--transport",
+        )
+    if selected == "resend" and kind != "lead":
+        raise typer.BadParameter(
+            "Resend test transport currently supports --kind lead",
+            param_hint="--kind",
         )
     try:
         if kind in {"negative", "lead"}:
@@ -1035,6 +1065,8 @@ def test_alert(
                 )
                 if selected == "webhook":
                     send_lead_alert(url or "", mention.query, [mention])
+                elif selected == "resend":
+                    send_lead_digest_resend(resend_settings, [mention])
                 else:
                     send_lead_digest_email(email_settings, [mention])
             else:
@@ -1122,6 +1154,16 @@ def _email_settings(config: Config) -> EmailSettings | None:
         security=config.smtp_security,
         username=config.smtp_username,
         password=config.smtp_password,
+    )
+
+
+def _resend_settings(config: Config) -> ResendSettings | None:
+    if not config.resend_api_key or not config.resend_to:
+        return None
+    return ResendSettings(
+        api_key=config.resend_api_key,
+        sender=config.resend_from,
+        recipients=tuple(config.resend_to),
     )
 
 
