@@ -268,11 +268,20 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
             self.config = config
 
         def track(self, query, pages=3):
-            calls.append((query, pages, self.config.lead_enabled, tuple(self.config.sources)))
+            calls.append(
+                (
+                    query,
+                    pages,
+                    self.config.lead_enabled,
+                    self.config.lead_fallback_alerts,
+                    tuple(self.config.sources),
+                )
+            )
             return SimpleNamespace(
                 errors={},
                 retry_counts={},
                 lead_analysis_error=None,
+                lead_candidates=1,
                 alert_error=None,
                 alert_pending=0,
                 threshold_pending=0,
@@ -287,6 +296,7 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
             closed.append(True)
 
     monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
     monkeypatch.setattr(cli.time, "sleep", delays.append)
 
@@ -312,14 +322,16 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
     assert [query for query, *_ in calls] == [
         query for _, query in cli.PRIMOVEZO_LEAD_KEYWORDS
     ]
-    assert all(pages == 2 for _, pages, _, _ in calls)
-    assert all(lead_enabled for _, _, lead_enabled, _ in calls)
-    assert all(sources == ("bluesky",) for _, _, _, sources in calls)
+    assert all(pages == 2 for _, pages, _, _, _ in calls)
+    assert all(lead_enabled for _, _, lead_enabled, _, _ in calls)
+    assert all(not fallback for _, _, _, fallback, _ in calls)
+    assert all(sources == ("bluesky",) for _, _, _, _, sources in calls)
     assert delays == [0.25] * (len(cli.PRIMOVEZO_LEAD_KEYWORDS) - 1)
     assert closed == [True]
     assert "Primovezo lead scan" in result.output
     assert "18 fetched" not in result.output
     assert "36 fetched" in result.output
+    assert "18 qualified lead(s)" in result.output
 
 
 def test_version_flag():
