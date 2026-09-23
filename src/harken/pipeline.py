@@ -206,9 +206,7 @@ class Pipeline:
                 ]
         else:
             alert_mentions = [
-                mention
-                for mention in new_mentions
-                if mention.sentiment is Sentiment.NEGATIVE
+                mention for mention in new_mentions if mention.sentiment is Sentiment.NEGATIVE
             ]
 
         result.fetched = len(collected)
@@ -374,11 +372,7 @@ class Pipeline:
                         send_mentions=(
                             (lambda query, mentions: send_lead_alert(url, query, mentions))
                             if self.config.lead_enabled
-                            else (
-                                lambda query, mentions: send_negative_alert(
-                                    url, query, mentions
-                                )
-                            )
+                            else (lambda query, mentions: send_negative_alert(url, query, mentions))
                         ),
                         send_threshold=lambda text, payload: send_threshold_alert(
                             url, text, payload
