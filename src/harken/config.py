@@ -140,6 +140,9 @@ class Config:
     lead_enabled: bool = field(
         default_factory=lambda: _bool_env("HARKEN_LEAD_ENABLED", False)
     )
+    lead_llm_provider: str = field(
+        default_factory=lambda: os.getenv("HARKEN_LEAD_LLM_PROVIDER", "none")
+    )
     lead_min_score: int = field(
         default_factory=lambda: _nonnegative_env_int("HARKEN_LEAD_MIN_SCORE", 70)
     )
