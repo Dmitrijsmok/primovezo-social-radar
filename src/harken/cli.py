@@ -18,6 +18,8 @@ from rich.table import Table
 from harken import __version__
 from harken.alerts import (
     EmailSettings,
+    send_lead_alert,
+    send_lead_email,
     send_negative_alert,
     send_negative_email,
     send_threshold_alert,
@@ -399,6 +401,54 @@ def leads_primovezo(
 
     if failed_keywords == len(keywords):
         raise typer.Exit(1)
+
+
+@lead_app.command("report")
+def leads_report(
+    min_score: int = typer.Option(
+        70, min=0, max=100, help="Minimum lead score to include."
+    ),
+    limit: int = typer.Option(50, min=1, max=500, help="Maximum unique leads to show."),
+    db: str = typer.Option(None, help="Database path (default: harken.db)."),
+):
+    """Show de-duplicated qualified ecommerce leads across all tracked keywords."""
+    with Store(db or Config().db_path) as store:
+        leads = store.unique_leads(min_score=min_score, limit=limit)
+
+    if not leads:
+        console.print(f"No unique leads found with score >= {min_score}.")
+        return
+
+    console.print(
+        f"[bold]Unique qualified leads: {len(leads)}[/bold] "
+        f"[dim](score >= {min_score})[/dim]"
+    )
+    for index, lead in enumerate(leads, start=1):
+        author = lead["author"] or "unknown"
+        queries = ", ".join(lead["matched_queries"])
+        console.print(
+            Panel(
+                "\n".join(
+                    [
+                        f"[bold]{lead['score']}/100[/bold] · {lead['category']} · "
+                        f"{lead['source']} · {author}",
+                        f"[dim]Matched: {queries}[/dim]",
+                        "",
+                        lead["text"] or lead["title"] or "",
+                        "",
+                        f"[bold]Why:[/bold] {lead['reason']}",
+                        (
+                            f"[bold]Suggested reply:[/bold] {lead['suggested_reply']}"
+                            if lead["suggested_reply"]
+                            else "[bold]Suggested reply:[/bold] -"
+                        ),
+                        f"[bold]Open:[/bold] {lead['url'] or '-'}",
+                    ]
+                ),
+                title=f"Lead {index}",
+                border_style="green",
+            )
+        )
 
 
 @app.command()
@@ -877,7 +927,9 @@ def test_alert(
     transport: str = typer.Option(
         None, help="Delivery transport: webhook or email (default: configured transport)."
     ),
-    kind: str = typer.Option("negative", help="Synthetic event: negative, volume, or sentiment."),
+    kind: str = typer.Option(
+        "negative", help="Synthetic event: negative, lead, volume, or sentiment."
+    ),
 ):
     """Send one synthetic alert to verify a webhook or SMTP configuration."""
     cfg = Config()
@@ -887,8 +939,10 @@ def test_alert(
     if selected not in {"webhook", "email"}:
         raise typer.BadParameter("transport must be webhook or email", param_hint="--transport")
     kind = kind.strip().lower()
-    if kind not in {"negative", "volume", "sentiment"}:
-        raise typer.BadParameter("kind must be negative, volume, or sentiment", param_hint="--kind")
+    if kind not in {"negative", "lead", "volume", "sentiment"}:
+        raise typer.BadParameter(
+            "kind must be negative, lead, volume, or sentiment", param_hint="--kind"
+        )
 
     url = webhook_url or cfg.webhook_url
     email_settings = _email_settings(cfg) if selected == "email" else None
@@ -902,23 +956,48 @@ def test_alert(
             param_hint="--transport",
         )
     try:
-        if kind == "negative":
-            mention = Mention(
-                source="harken",
-                query="webhook test",
-                author="Harken",
-                text=(
-                    "This is a synthetic negative-mention alert. "
-                    "Your alert transport is configured correctly."
-                ),
-                created_at=datetime.now(timezone.utc),
-                sentiment=Sentiment.NEGATIVE,
-                sentiment_score=-1.0,
-            )
-            if selected == "webhook":
-                send_negative_alert(url or "", mention.query, [mention])
+        if kind in {"negative", "lead"}:
+            if kind == "lead":
+                mention = Mention(
+                    source="harken",
+                    query="interneta veikals",
+                    author="Social Radar test",
+                    text=(
+                        "Meklēju e-komercijas platformu jaunam interneta veikalam. "
+                        "Šis ir sintētisks testa leads."
+                    ),
+                    url="https://example.test/social-radar-lead",
+                    created_at=datetime.now(timezone.utc),
+                    lead_relevant=True,
+                    lead_score=92,
+                    lead_category="ecommerce",
+                    lead_reason="Sintētisks tests e-pasta piegādes pārbaudei.",
+                    suggested_reply=(
+                        "Sveiki! Redzēju, ka meklējat e-komercijas platformu. "
+                        "Ja vēl salīdzināt variantus, varu īsi parādīt Primovezo."
+                    ),
+                )
+                if selected == "webhook":
+                    send_lead_alert(url or "", mention.query, [mention])
+                else:
+                    send_lead_email(email_settings, mention.query, [mention])
             else:
-                send_negative_email(email_settings, mention.query, [mention])
+                mention = Mention(
+                    source="harken",
+                    query="webhook test",
+                    author="Harken",
+                    text=(
+                        "This is a synthetic negative-mention alert. "
+                        "Your alert transport is configured correctly."
+                    ),
+                    created_at=datetime.now(timezone.utc),
+                    sentiment=Sentiment.NEGATIVE,
+                    sentiment_score=-1.0,
+                )
+                if selected == "webhook":
+                    send_negative_alert(url or "", mention.query, [mention])
+                else:
+                    send_negative_email(email_settings, mention.query, [mention])
         else:
             event = f"harken.{kind}_spike" if kind == "volume" else "harken.sentiment_drop"
             text = f"Harken test: synthetic {kind} threshold alert"
