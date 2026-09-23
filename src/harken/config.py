@@ -137,6 +137,10 @@ class Config:
         )
     )
     llm_provider: str = field(default_factory=lambda: os.getenv("HARKEN_LLM_PROVIDER", "none"))
+    lead_enabled: bool = field(default_factory=lambda: _bool_env("HARKEN_LEAD_ENABLED", False))
+    lead_min_score: int = field(
+        default_factory=lambda: _nonnegative_env_int("HARKEN_LEAD_MIN_SCORE", 70)
+    )
     # source-specific options
     mastodon_instance: str = field(
         default_factory=lambda: os.getenv("HARKEN_MASTODON_INSTANCE", "mastodon.social")
@@ -210,6 +214,10 @@ class Config:
     session_secure: bool = field(default_factory=lambda: _bool_env("HARKEN_SESSION_SECURE", False))
 
     def __post_init__(self) -> None:
+        if self.lead_min_score > 100:
+            raise ValueError(
+                f"HARKEN_LEAD_MIN_SCORE must be at most 100 (got {self.lead_min_score})"
+            )
         if self.smtp_port > 65535:
             raise ValueError(f"HARKEN_SMTP_PORT must be at most 65535 (got {self.smtp_port})")
         email_values = bool(
