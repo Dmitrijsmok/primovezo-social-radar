@@ -6,6 +6,7 @@ live source. `_serve` (which blocks on uvicorn.run) is stubbed out.
 
 import csv
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import httpx
@@ -13,6 +14,7 @@ import respx
 from typer.testing import CliRunner
 
 from harken import cli
+from harken.models import Mention
 from harken.store import Store
 
 runner = CliRunner()
@@ -282,6 +284,7 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
                 retry_counts={},
                 lead_analysis_error=None,
                 lead_candidates=1,
+                lead_candidate_mentions=[],
                 alert_error=None,
                 alert_pending=0,
                 threshold_pending=0,
@@ -329,16 +332,88 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
     assert "Primovezo lead scan" in result.output
     expected = len(cli.PRIMOVEZO_LEAD_KEYWORDS)
     assert f"{expected * 2} fetched" in result.output
-    assert f"{expected} qualified lead(s)" in result.output
+    assert f"{expected} qualified match(es)" in result.output
     assert all(group == "ecommerce" for group, _ in cli.PRIMOVEZO_LEAD_KEYWORDS)
+
+
+def test_primovezo_runner_sends_one_internal_digest(tmp_path, monkeypatch):
+    db_path = tmp_path / "digest.db"
+    lead = Mention(
+        source="bluesky",
+        query=cli.PRIMOVEZO_LEAD_KEYWORDS[0][1],
+        author="buyer.bsky.social",
+        text="Meklēju e-komercijas platformu jaunam interneta veikalam",
+        url="https://bsky.app/profile/buyer/post/1",
+        created_at=datetime(2026, 9, 23, tzinfo=timezone.utc),
+        lead_relevant=True,
+        lead_score=94,
+        lead_category="ecommerce",
+        lead_reason="Konkrēts e-komercijas platformas pieprasījums",
+        suggested_reply="Sveiki! Ja vēl salīdzināt platformas, varu īsi parādīt Primovezo.",
+    )
+    delivered = []
+    calls = []
+
+    class FakePipeline:
+        def __init__(self, config):
+            self.config = config
+            self.store = Store(config.db_path)
+
+        def track(self, query, pages=3):
+            calls.append(query)
+            candidates = []
+            if len(calls) == 1:
+                candidate = lead.model_copy(update={"query": query})
+                self.store.upsert([candidate])
+                self.store.save_lead_analysis([candidate])
+                candidates = [candidate]
+            return SimpleNamespace(
+                errors={},
+                retry_counts={},
+                lead_analysis_error=None,
+                lead_candidates=len(candidates),
+                lead_candidate_mentions=candidates,
+                fetched=len(candidates),
+                new=len(candidates),
+            )
+
+        def close(self):
+            self.store.close()
+
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("HARKEN_EMAIL_TO", "owner@example.test")
+    monkeypatch.setenv("HARKEN_EMAIL_FROM", "radar@example.test")
+    monkeypatch.setenv("HARKEN_SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("HARKEN_SMTP_SECURITY", "none")
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
+    monkeypatch.setattr(
+        cli,
+        "send_lead_digest_email",
+        lambda settings, mentions: delivered.append((settings, list(mentions))),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["leads", "primovezo", "--delay", "0", "--db", str(db_path)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(delivered) == 1
+    settings, mentions = delivered[0]
+    assert settings.recipients == ("owner@example.test",)
+    assert [mention.id for mention in mentions] == [lead.id]
+    assert "emailed 1 lead(s) in one internal digest" in result.output
+
+    with Store(db_path) as store:
+        target = "lead-" + cli.email_target_key(settings)
+        assert store.pending_alerts_for_target(target) == []
 
 
 def test_leads_report_shows_one_unique_post_for_overlapping_queries(tmp_path):
     db_path = tmp_path / "leads-report.db"
     with Store(db_path) as store:
-        from datetime import datetime, timezone
-        from harken.models import Mention
-
         rows = []
         for query, score in (("interneta veikals", 90), ("e-komercijas platforma", 95)):
             mention = Mention(
