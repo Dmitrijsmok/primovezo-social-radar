@@ -11,9 +11,13 @@ import harken.alerts as alerts
 from harken.alerts import (
     EmailDeliveryError,
     EmailSettings,
+    ResendDeliveryError,
+    ResendSettings,
     WebhookDeliveryError,
     email_target_key,
+    resend_target_key,
     send_lead_digest_email,
+    send_lead_digest_resend,
     send_negative_alert,
     send_negative_email,
     send_threshold_alert,
@@ -194,6 +198,71 @@ def test_internal_lead_digest_email_marks_draft_as_unsent(monkeypatch):
     assert "Draft reply (not sent automatically)" in body
     assert "buyer.bsky.social" in body
     assert "https://bsky.app/profile/buyer/post/1" in body
+
+
+@respx.mock
+def test_internal_lead_digest_resend_uses_api_and_idempotency():
+    route = respx.post("https://api.resend.com/emails").mock(
+        return_value=httpx.Response(200, json={"id": "email_123"})
+    )
+    settings = ResendSettings(
+        api_key="re_test_secret",
+        sender="noreply@primovezo.com",
+        recipients=("owner@example.test",),
+    )
+    mention = Mention(
+        source="bluesky",
+        query="interneta veikals",
+        author="buyer.bsky.social",
+        text="Meklēju e-komercijas platformu interneta veikalam",
+        url="https://bsky.app/profile/buyer/post/1",
+        created_at=datetime(2026, 9, 23, tzinfo=timezone.utc),
+        lead_relevant=True,
+        lead_score=94,
+        lead_category="ecommerce",
+        lead_reason="Konkrēts e-komercijas pieprasījums",
+        suggested_reply="Sveiki! Varu īsi parādīt Primovezo.",
+    )
+
+    send_lead_digest_resend(settings, [mention])
+
+    request = route.calls[0].request
+    payload = json.loads(request.content)
+    assert request.headers["Authorization"] == "Bearer re_test_secret"
+    assert request.headers["Idempotency-Key"].startswith("primovezo-lead-digest/")
+    assert payload["from"] == "noreply@primovezo.com"
+    assert payload["to"] == ["owner@example.test"]
+    assert payload["subject"] == "[Primovezo Social Radar] 1 new ecommerce lead"
+    assert "Draft reply (not sent automatically)" in payload["text"]
+
+    first_key = request.headers["Idempotency-Key"]
+    send_lead_digest_resend(settings, [mention])
+    second_key = route.calls[1].request.headers["Idempotency-Key"]
+    assert second_key == first_key
+    assert resend_target_key(settings).startswith("resend-")
+
+
+@respx.mock
+def test_resend_error_does_not_leak_api_key():
+    route = respx.post("https://api.resend.com/emails").mock(
+        return_value=httpx.Response(503, text="upstream failure re_test_secret")
+    )
+    settings = ResendSettings(
+        api_key="re_test_secret",
+        sender="noreply@primovezo.com",
+        recipients=("owner@example.test",),
+    )
+    mention = negative_mention()
+    mention.lead_relevant = True
+    mention.lead_score = 90
+    mention.lead_category = "ecommerce"
+
+    with pytest.raises(ResendDeliveryError) as exc:
+        send_lead_digest_resend(settings, [mention])
+
+    assert "503" in str(exc.value)
+    assert "re_test_secret" not in str(exc.value)
+    assert route.called
 
 
 def test_threshold_email_supports_implicit_tls(monkeypatch):

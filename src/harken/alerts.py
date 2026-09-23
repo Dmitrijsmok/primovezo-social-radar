@@ -25,6 +25,40 @@ class EmailDeliveryError(RuntimeError):
     """A sanitized delivery error that never includes SMTP credentials."""
 
 
+class ResendDeliveryError(RuntimeError):
+    """A sanitized delivery error that never includes the Resend API key."""
+
+
+@dataclass(frozen=True)
+class ResendSettings:
+    """Validated Resend configuration for internal digest delivery."""
+
+    api_key: str
+    sender: str
+    recipients: tuple[str, ...]
+    timeout: float = 15.0
+
+    def validated(self) -> ResendSettings:
+        api_key = self.api_key.strip()
+        sender = self.sender.strip()
+        recipients = tuple(dict.fromkeys(address.strip() for address in self.recipients))
+        if not api_key:
+            raise ValueError("HARKEN_RESEND_API_KEY must not be empty")
+        _validate_email_address(sender, "HARKEN_RESEND_FROM")
+        if not recipients:
+            raise ValueError("HARKEN_RESEND_TO must contain at least one address")
+        for recipient in recipients:
+            _validate_email_address(recipient, "HARKEN_RESEND_TO")
+        if self.timeout <= 0:
+            raise ValueError("Resend timeout must be greater than 0")
+        return ResendSettings(
+            api_key=api_key,
+            sender=sender,
+            recipients=recipients,
+            timeout=self.timeout,
+        )
+
+
 @dataclass(frozen=True)
 class EmailSettings:
     """Validated SMTP connection and recipient configuration."""
@@ -92,6 +126,20 @@ def email_target_key(settings: EmailSettings) -> str:
         separators=(",", ":"),
     )
     return "email-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+
+def resend_target_key(settings: ResendSettings) -> str:
+    """Stable delivery identifier excluding the Resend API key."""
+    configured = settings.validated()
+    identity = json.dumps(
+        {
+            "sender": configured.sender.lower(),
+            "recipients": sorted(configured.recipients, key=str.casefold),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return "resend-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
 
 
 def send_negative_alert(url: str, query: str, mentions: list[Mention]) -> None:
@@ -163,6 +211,57 @@ def send_lead_digest_email(settings: EmailSettings, mentions: list[Mention]) -> 
     count = len(mentions)
     subject = f"[Primovezo Social Radar] {count} new ecommerce lead{'s' if count != 1 else ''}"
     _deliver_email(settings, subject, _lead_alert_text("daily ecommerce scan", mentions))
+
+
+def send_lead_digest_resend(settings: ResendSettings, mentions: list[Mention]) -> None:
+    """Deliver one internal Primovezo lead digest through the Resend Email API."""
+    if not mentions:
+        return
+    configured = settings.validated()
+    count = len(mentions)
+    subject = f"[Primovezo Social Radar] {count} new ecommerce lead{'s' if count != 1 else ''}"
+    body = _lead_alert_text("daily ecommerce scan", mentions)
+    digest_identity = "|".join(
+        sorted(f"{mention.source}:{mention.id}" for mention in mentions)
+    )
+    idempotency_key = (
+        "primovezo-lead-digest/"
+        + hashlib.sha256(
+            (
+                configured.sender
+                + "|"
+                + ",".join(sorted(configured.recipients, key=str.casefold))
+                + "|"
+                + digest_identity
+            ).encode("utf-8")
+        ).hexdigest()[:48]
+    )
+    try:
+        response = httpx.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {configured.api_key}",
+                "Content-Type": "application/json",
+                "Idempotency-Key": idempotency_key,
+                "User-Agent": USER_AGENT,
+            },
+            json={
+                "from": configured.sender,
+                "to": list(configured.recipients),
+                "subject": subject,
+                "text": body,
+            },
+            timeout=configured.timeout,
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise ResendDeliveryError(
+            f"Resend returned HTTP {exc.response.status_code}"
+        ) from None
+    except httpx.RequestError as exc:
+        raise ResendDeliveryError(
+            f"Resend request failed: {type(exc).__name__}"
+        ) from None
 
 
 def send_threshold_email(settings: EmailSettings, text: str, payload: dict) -> None:
