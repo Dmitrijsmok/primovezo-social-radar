@@ -125,7 +125,7 @@ def track(
     cfg = _tracking_config(sources, limit, db)
 
     console.print(f"Listening for [bold]“{query}”[/bold] across: {', '.join(cfg.sources)} …")
-    pipe = Pipeline(scan_cfg)
+    pipe = Pipeline(cfg)
     try:
         result = pipe.track(query, pages=pages, project_id=project)
 
@@ -325,7 +325,7 @@ def leads_primovezo(
     digest_error: str | None = None
     failed_keywords = 0
     lead_fallbacks = 0
-    pipe = Pipeline(cfg)
+    pipe = Pipeline(scan_cfg)
     try:
         for index, (group, query) in enumerate(keywords, start=1):
             console.print(f"[dim]{index}/{len(keywords)}[/dim] [bold]{group}[/bold] · “{query}”")
