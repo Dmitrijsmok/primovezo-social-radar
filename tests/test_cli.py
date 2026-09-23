@@ -279,6 +279,7 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
                     tuple(self.config.sources),
                     self.config.source_retries,
                     self.config.retry_backoff,
+                    self.config.bluesky_lang,
                 )
             )
             return SimpleNamespace(
@@ -325,12 +326,13 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert [query for query, *_ in calls] == [query for _, query in cli.PRIMOVEZO_LEAD_KEYWORDS]
-    assert all(pages == 2 for _, pages, _, _, _, _, _ in calls)
-    assert all(lead_enabled for _, _, lead_enabled, _, _, _, _ in calls)
-    assert all(not fallback for _, _, _, fallback, _, _, _ in calls)
-    assert all(sources == ("bluesky",) for _, _, _, _, sources, _, _ in calls)
-    assert all(retries == 3 for _, _, _, _, _, retries, _ in calls)
-    assert all(backoff == 10.0 for _, _, _, _, _, _, backoff in calls)
+    assert all(pages == 2 for _, pages, _, _, _, _, _, _ in calls)
+    assert all(lead_enabled for _, _, lead_enabled, _, _, _, _, _ in calls)
+    assert all(not fallback for _, _, _, fallback, _, _, _, _ in calls)
+    assert all(sources == ("bluesky",) for _, _, _, _, sources, _, _, _ in calls)
+    assert all(retries == 3 for _, _, _, _, _, retries, _, _ in calls)
+    assert all(backoff == 10.0 for _, _, _, _, _, _, backoff, _ in calls)
+    assert all(lang == "lv" for _, _, _, _, _, _, _, lang in calls)
     assert delays == [0.25] * (len(cli.PRIMOVEZO_LEAD_KEYWORDS) - 1)
     assert closed == [True]
     assert "Primovezo lead scan" in result.output
@@ -338,6 +340,65 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
     assert f"{expected * 2} fetched" in result.output
     assert f"{expected} qualified match(es)" in result.output
     assert all(group == "ecommerce" for group, _ in cli.PRIMOVEZO_LEAD_KEYWORDS)
+
+
+def test_primovezo_recent_scans_bounded_window_without_delivery(tmp_path, monkeypatch):
+    calls = []
+
+    class FakePipeline:
+        def __init__(self, config):
+            self.config = config
+            assert config.sources == ["bluesky"]
+            assert config.bluesky_lang == "lv"
+            assert config.email_to == []
+            assert config.resend_api_key is None
+            assert config.resend_to == []
+            assert config.webhook_url is None
+
+        def track(self, query, **kwargs):
+            calls.append((query, kwargs))
+            return SimpleNamespace(
+                errors={},
+                retry_counts={},
+                lead_analysis_error=None,
+                lead_candidates=0,
+                lead_candidate_mentions=[],
+                fetched=1,
+                new=1,
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "leads",
+            "recent",
+            "--days",
+            "5",
+            "--pages",
+            "4",
+            "--delay",
+            "0",
+            "--db",
+            str(tmp_path / "recent.db"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(calls) == len(cli.PRIMOVEZO_LEAD_KEYWORDS)
+    assert all(kwargs["pages"] == 4 for _, kwargs in calls)
+    assert all(kwargs["classify_fetched"] is True for _, kwargs in calls)
+    assert all(kwargs["update_source_state"] is False for _, kwargs in calls)
+    assert all(kwargs["since_override"] is not None for _, kwargs in calls)
+    assert "recent 5-day scan" in result.output
+    assert "No email was sent" in result.output
 
 
 def test_primovezo_runner_rejects_reddit(monkeypatch):
