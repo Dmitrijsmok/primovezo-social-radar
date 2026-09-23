@@ -189,6 +189,16 @@ class Config:
     smtp_password: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_SMTP_PASSWORD") or None
     )
+    resend_api_key: str | None = field(
+        default_factory=lambda: os.getenv("HARKEN_RESEND_API_KEY") or None
+    )
+    resend_from: str = field(
+        default_factory=lambda: os.getenv(
+            "HARKEN_RESEND_FROM", "noreply@primovezo.com"
+        ).strip()
+        or "noreply@primovezo.com"
+    )
+    resend_to: list[str] = field(default_factory=lambda: _env_list("HARKEN_RESEND_TO"))
     alert_window_hours: int = field(
         default_factory=lambda: _positive_env_int("HARKEN_ALERT_WINDOW_HOURS", 24)
     )
@@ -239,6 +249,10 @@ class Config:
             )
         if bool(self.smtp_username) != bool(self.smtp_password):
             raise ValueError("HARKEN_SMTP_USERNAME and HARKEN_SMTP_PASSWORD must be set together")
+        if bool(self.resend_api_key) != bool(self.resend_to):
+            raise ValueError(
+                "HARKEN_RESEND_API_KEY and HARKEN_RESEND_TO must be set together"
+            )
         if bool(self.auth_username) != bool(self.auth_password):
             raise ValueError("HARKEN_AUTH_USERNAME and HARKEN_AUTH_PASSWORD must be set together")
         if self.auth_mode == "basic" and not (self.auth_username and self.auth_password):
