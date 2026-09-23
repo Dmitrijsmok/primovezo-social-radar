@@ -698,7 +698,9 @@ class Store:
         if limit < 1:
             raise ValueError("limit must be at least 1")
 
-        selected_queries = list(dict.fromkeys(query.strip() for query in queries or [] if query.strip()))
+        selected_queries = list(
+            dict.fromkeys(query.strip() for query in queries or [] if query.strip())
+        )
         where = "WHERE l.relevant = 1"
         args: list = []
         if queries is not None:
