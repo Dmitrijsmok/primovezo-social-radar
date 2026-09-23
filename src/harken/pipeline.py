@@ -55,6 +55,7 @@ class TrackResult:
     sentiment_error: str | None = None
     lead_analysis_error: str | None = None
     lead_candidates: int = 0
+    lead_candidate_mentions: list[Mention] = field(default_factory=list)
     analysis_error: str | None = None
     alerted: int = 0
     alert_pending: int = 0
@@ -207,6 +208,7 @@ class Pipeline:
                     and (mention.lead_score or 0) >= self.config.lead_min_score
                 ]
                 result.lead_candidates = len(alert_mentions)
+                result.lead_candidate_mentions = list(alert_mentions)
         else:
             alert_mentions = [
                 mention for mention in new_mentions if mention.sentiment is Sentiment.NEGATIVE
