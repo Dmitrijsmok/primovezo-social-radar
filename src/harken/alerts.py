@@ -268,10 +268,7 @@ def _alert_text(query: str, mentions: list[Mention]) -> str:
 
 def _lead_alert_text(query: str, mentions: list[Mention]) -> str:
     count = len(mentions)
-    lines = [
-        f"Social Radar: {count} new lead candidate{'s' if count != 1 else ''} "
-        f"for “{query}”"
-    ]
+    lines = [f"Social Radar: {count} new lead candidate{'s' if count != 1 else ''} for “{query}”"]
     for mention in mentions[:10]:
         excerpt = " ".join(mention.content.split())[:500]
         source = mention.source
