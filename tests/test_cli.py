@@ -392,7 +392,7 @@ def test_primovezo_recent_scans_bounded_window_without_delivery(tmp_path, monkey
     )
 
     assert result.exit_code == 0, result.output
-    assert len(calls) == len(cli.PRIMOVEZO_LEAD_KEYWORDS)
+    assert len(calls) == len(cli.PRIMOVEZO_DISCOVERY_KEYWORDS)
     assert all(kwargs["pages"] == 4 for _, kwargs in calls)
     assert all(kwargs["classify_fetched"] is True for _, kwargs in calls)
     assert all(kwargs["update_source_state"] is False for _, kwargs in calls)
