@@ -319,9 +319,7 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
     )
 
     assert result.exit_code == 0, result.output
-    assert [query for query, *_ in calls] == [
-        query for _, query in cli.PRIMOVEZO_LEAD_KEYWORDS
-    ]
+    assert [query for query, *_ in calls] == [query for _, query in cli.PRIMOVEZO_LEAD_KEYWORDS]
     assert all(pages == 2 for _, pages, _, _, _ in calls)
     assert all(lead_enabled for _, _, lead_enabled, _, _ in calls)
     assert all(not fallback for _, _, _, fallback, _ in calls)
