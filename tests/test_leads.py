@@ -105,7 +105,7 @@ def test_pipeline_persists_lead_analysis_for_new_mentions(tmp_path, monkeypatch)
             sources=["leadtest"],
             lead_enabled=True,
             lead_min_score=70,
-            llm_provider="test",
+            lead_llm_provider="test",
         )
     )
     result = pipe.track("interneta veikals")
