@@ -43,6 +43,7 @@ def test_config_defaults_without_env():
     assert cfg.log_level == "INFO"
     assert cfg.email_to == []
     assert cfg.sentiment_analyzer == "lexicon"
+    assert cfg.lead_fallback_alerts is True
     assert cfg.auth_mode == "none"
     assert cfg.session_hours == 12
     assert not cfg.session_secure
@@ -125,6 +126,11 @@ def test_email_delivery_settings_are_loaded(monkeypatch):
 def test_llm_sentiment_is_explicitly_opt_in(monkeypatch):
     monkeypatch.setenv("HARKEN_SENTIMENT_ANALYZER", "llm")
     assert config.Config().sentiment_analyzer == "llm"
+
+
+def test_lead_fallback_alerts_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("HARKEN_LEAD_FALLBACK_ALERTS", "false")
+    assert config.Config().lead_fallback_alerts is False
 
 
 def test_partial_email_configuration_is_rejected(monkeypatch):
