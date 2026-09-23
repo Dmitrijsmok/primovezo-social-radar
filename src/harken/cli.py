@@ -59,6 +59,9 @@ app.add_typer(lead_app, name="leads")
 console = Console()
 
 
+PRIMOVEZO_ALLOWED_SOURCES = {"bluesky", "threads", "x"}
+
+
 def _version(value: bool):
     if value:
         console.print(f"harken {__version__}")
@@ -278,6 +281,14 @@ def leads_primovezo(
 ):
     """Scan the built-in Primovezo Latvian commercial-intent keyword profile."""
     cfg = _tracking_config(sources, limit, db)
+    disallowed_sources = sorted(set(cfg.sources) - PRIMOVEZO_ALLOWED_SOURCES)
+    if disallowed_sources:
+        allowed = ", ".join(sorted(PRIMOVEZO_ALLOWED_SOURCES))
+        blocked = ", ".join(disallowed_sources)
+        raise typer.BadParameter(
+            f"Primovezo Latvia Radar does not use: {blocked}. Allowed sources: {allowed}.",
+            param_hint="--sources",
+        )
     cfg.lead_enabled = True
     if cfg.lead_llm_provider.strip().lower() in {"", "none", "null"}:
         raise typer.BadParameter(
