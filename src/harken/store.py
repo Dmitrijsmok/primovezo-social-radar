@@ -753,13 +753,8 @@ class Store:
 
         qualified = [lead for lead in grouped.values() if lead["score"] >= min_score]
         qualified.sort(
-            key=lambda lead: (
-                -lead["score"],
-                lead["created_at"],
-                lead["source"],
-                lead["id"],
-            ),
-            reverse=False,
+            key=lambda lead: (lead["score"], lead["analyzed_at"], lead["created_at"]),
+            reverse=True,
         )
         return qualified[:limit]
 
