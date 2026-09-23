@@ -505,8 +505,7 @@ class Pipeline:
             http_status = _http_status(exc)
             status_suffix = f" (HTTP {http_status})" if http_status is not None else ""
             safe_error = (
-                f"LLM lead classification unavailable: {type(exc).__name__}: {exc}"
-                f"{status_suffix}"
+                f"LLM lead classification unavailable: {type(exc).__name__}: {exc}{status_suffix}"
             )
             log_event(
                 logger,
