@@ -340,6 +340,21 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
     assert all(group == "ecommerce" for group, _ in cli.PRIMOVEZO_LEAD_KEYWORDS)
 
 
+def test_primovezo_runner_rejects_reddit(monkeypatch):
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
+
+    result = runner.invoke(
+        cli.app,
+        ["leads", "primovezo", "--sources", "bluesky,reddit", "--delay", "0"],
+    )
+
+    assert result.exit_code != 0
+    assert "does not use: reddit" in result.output
+    assert "bluesky, threads, x" in result.output
+
+
 def test_primovezo_runner_sends_one_internal_digest(tmp_path, monkeypatch):
     db_path = tmp_path / "digest.db"
     lead = Mention(
