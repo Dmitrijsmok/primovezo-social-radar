@@ -87,6 +87,47 @@ def test_same_mention_can_belong_to_multiple_queries(tmp_path):
     db.close()
 
 
+def test_unique_leads_dedupes_same_post_across_queries_and_keeps_best_score(tmp_path):
+    db = Store(tmp_path / "leads.db")
+    first = mk(
+        "Need an ecommerce platform",
+        source="bluesky",
+        query="interneta veikals",
+        url="https://bsky.app/profile/example/post/1",
+    )
+    second = mk(
+        "Need an ecommerce platform",
+        source="bluesky",
+        query="e-komercijas platforma",
+        url="https://bsky.app/profile/example/post/1",
+    )
+    first.lead_relevant = True
+    first.lead_score = 90
+    first.lead_category = "ecommerce"
+    first.lead_reason = "Pirmais vaicājums"
+    first.suggested_reply = "Pirmais variants"
+    second.lead_relevant = True
+    second.lead_score = 95
+    second.lead_category = "ecommerce"
+    second.lead_reason = "Labākais vaicājums"
+    second.suggested_reply = "Labākais variants"
+
+    db.upsert([first, second])
+    db.save_lead_analysis([first, second])
+
+    leads = db.unique_leads(min_score=70)
+
+    assert len(leads) == 1
+    assert leads[0]["score"] == 95
+    assert leads[0]["reason"] == "Labākais vaicājums"
+    assert leads[0]["suggested_reply"] == "Labākais variants"
+    assert set(leads[0]["matched_queries"]) == {
+        "interneta veikals",
+        "e-komercijas platforma",
+    }
+    db.close()
+
+
 def test_filter_by_sentiment_and_source(tmp_path):
     db = Store(tmp_path / "t.db")
     db.upsert(
