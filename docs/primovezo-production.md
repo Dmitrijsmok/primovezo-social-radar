@@ -56,6 +56,15 @@ updates stored lead analysis without fetching social networks or sending a diges
 
 ## 3. Verify a manual scan
 
+Threads is included automatically when this is present in the local `.env`:
+
+```dotenv
+HARKEN_THREADS_ACCESS_TOKEN=<token>
+```
+
+Without that variable, Primovezo continues with Bluesky only and prints that Threads
+is disabled.
+
 ```bash
 uv run harken leads primovezo --limit 10
 harken logs
