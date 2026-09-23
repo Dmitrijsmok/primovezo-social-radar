@@ -154,6 +154,75 @@ def test_backfill_cursor_survives_restart_and_completes(tmp_path, monkeypatch):
     pipe.close()
 
 
+def test_window_scan_uses_explicit_since_and_does_not_move_incremental_state(
+    tmp_path, monkeypatch
+):
+    from harken.sources import REGISTRY
+    from harken.sources.base import FetchPage
+
+    class WindowSource:
+        label = "Window"
+        needs_config = False
+        calls = []
+
+        def __init__(self, **options):
+            pass
+
+        def fetch_page(self, query, limit=50, *, cursor=None, since=None):
+            type(self).calls.append((cursor, since))
+            if cursor is None:
+                return FetchPage(
+                    [
+                        Mention(
+                            source="window",
+                            query=query,
+                            text="first",
+                            url="https://window.test/1",
+                            created_at=datetime(2026, 9, 22, tzinfo=timezone.utc),
+                        )
+                    ],
+                    "older",
+                )
+            return FetchPage(
+                [
+                    Mention(
+                        source="window",
+                        query=query,
+                        text="second",
+                        url="https://window.test/2",
+                        created_at=datetime(2026, 9, 21, tzinfo=timezone.utc),
+                    )
+                ],
+                None,
+            )
+
+    WindowSource.calls = []
+    monkeypatch.setitem(REGISTRY, "window", WindowSource)
+    cutoff = datetime(2026, 9, 18, tzinfo=timezone.utc)
+    pipe = Pipeline(
+        Config(
+            db_path=str(tmp_path / "window.db"),
+            sources=["window"],
+            source_retries=0,
+        )
+    )
+
+    result = pipe.track(
+        "acme",
+        pages=5,
+        since_override=cutoff,
+        update_source_state=False,
+    )
+
+    assert result.mode == "window"
+    assert result.fetched == 2
+    assert WindowSource.calls == [(None, cutoff), ("older", cutoff)]
+    state = pipe.store.source_state("acme", "window")
+    assert state.get("newest_at") is None
+    assert state.get("incremental_cursor") is None
+    pipe.close()
+
+
 def test_sample_demo_data_flows_through(tmp_path):
     from harken.analyze.insights import ThemeExtractor
     from harken.analyze.sentiment import LexiconSentiment
