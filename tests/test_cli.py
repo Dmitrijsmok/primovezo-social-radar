@@ -358,6 +358,8 @@ def test_primovezo_runner_sends_one_internal_digest(tmp_path, monkeypatch):
         def __init__(self, config):
             self.config = config
             assert config.email_to == []
+            assert config.resend_api_key is None
+            assert config.resend_to == []
             assert config.webhook_url is None
             self.store = Store(config.db_path)
 
@@ -384,15 +386,14 @@ def test_primovezo_runner_sends_one_internal_digest(tmp_path, monkeypatch):
 
     monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
     monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
-    monkeypatch.setenv("HARKEN_EMAIL_TO", "owner@example.test")
-    monkeypatch.setenv("HARKEN_EMAIL_FROM", "radar@example.test")
-    monkeypatch.setenv("HARKEN_SMTP_HOST", "smtp.example.test")
-    monkeypatch.setenv("HARKEN_SMTP_SECURITY", "none")
+    monkeypatch.setenv("HARKEN_RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("HARKEN_RESEND_FROM", "noreply@primovezo.com")
+    monkeypatch.setenv("HARKEN_RESEND_TO", "owner@example.test")
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
     monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
     monkeypatch.setattr(
         cli,
-        "send_lead_digest_email",
+        "send_lead_digest_resend",
         lambda settings, mentions: delivered.append((settings, list(mentions))),
     )
 
@@ -404,12 +405,13 @@ def test_primovezo_runner_sends_one_internal_digest(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert len(delivered) == 1
     settings, mentions = delivered[0]
+    assert settings.sender == "noreply@primovezo.com"
     assert settings.recipients == ("owner@example.test",)
     assert [mention.id for mention in mentions] == [lead.id]
-    assert "emailed 1 lead(s) in one internal digest" in result.output
+    assert "delivered 1 lead(s) in one internal digest" in result.output
 
     with Store(db_path) as store:
-        target = "lead-" + cli.email_target_key(settings)
+        target = "lead-" + cli.resend_target_key(settings)
         assert store.pending_alerts_for_target(target) == []
 
 
@@ -497,6 +499,30 @@ def test_alert_command_can_send_synthetic_lead_email(monkeypatch):
     assert mentions[0].lead_score == 92
     assert mentions[0].lead_category == "ecommerce"
     assert "e-komercijas platformu" in mentions[0].text
+
+
+def test_alert_command_can_send_synthetic_lead_with_resend(monkeypatch):
+    monkeypatch.setenv("HARKEN_RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("HARKEN_RESEND_FROM", "noreply@primovezo.com")
+    monkeypatch.setenv("HARKEN_RESEND_TO", "owner@example.test")
+    delivered = []
+    monkeypatch.setattr(
+        cli,
+        "send_lead_digest_resend",
+        lambda settings, mentions: delivered.append((settings, mentions)),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["test-alert", "--transport", "resend", "--kind", "lead"],
+    )
+
+    assert result.exit_code == 0, result.output
+    settings, mentions = delivered[0]
+    assert settings.sender == "noreply@primovezo.com"
+    assert settings.recipients == ("owner@example.test",)
+    assert mentions[0].lead_score == 92
+    assert "resend test delivered" in result.output
 
 
 def test_version_flag():
