@@ -90,9 +90,9 @@ def test_classifier_prompt_limits_primovezo_to_ecommerce():
     assert "Do NOT offer WordPress work" in prompt
     assert "ecommerce platform" in prompt
     assert "market_lv" in prompt
-    assert "Latvian-language posts qualify for the market" in prompt
-    assert "Russian- or English-language posts qualify only" in prompt
-    assert "Do not translate a foreign post" in prompt
+    assert "Only Latvian-language posts" in prompt
+    assert "all other non-Latvian posts do NOT qualify" in prompt
+    assert "Do not translate a foreign" in prompt
 
 
 def test_classifier_forces_non_latvia_post_irrelevant():
