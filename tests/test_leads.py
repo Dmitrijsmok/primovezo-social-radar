@@ -183,9 +183,7 @@ def test_lead_alerts_are_deduped_across_keywords(tmp_path, monkeypatch):
     pipe.close()
 
 
-def test_strict_lead_mode_does_not_alert_raw_matches_on_classifier_failure(
-    tmp_path, monkeypatch
-):
+def test_strict_lead_mode_does_not_alert_raw_matches_on_classifier_failure(tmp_path, monkeypatch):
     from harken.sources import REGISTRY
 
     class LeadSource:
