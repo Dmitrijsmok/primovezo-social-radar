@@ -189,6 +189,9 @@ uv run harken leads primovezo
 Run that command once per day with cron or a systemd timer. When new qualified leads
 exist, one digest goes to `HARKEN_EMAIL_TO`. No prospect is contacted automatically.
 
+For the production user-level systemd timer, SMTP test, logs, and enable/disable
+commands, see [docs/primovezo-production.md](docs/primovezo-production.md).
+
 Threads uses Meta's official keyword-search API and requires a user access token
 with the `threads_keyword_search` permission. The access token is sent in the
 Authorization header rather than the query string.
