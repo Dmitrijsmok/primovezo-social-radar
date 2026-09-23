@@ -39,7 +39,6 @@ def test_openai_provider_reads_model_env(monkeypatch):
     assert p.available is True
 
 
-
 def test_openai_provider_retries_transient_503(monkeypatch):
     calls = 0
     delays = []
