@@ -42,7 +42,7 @@ def classify_leads(mentions: list[Mention], provider: LLMProvider) -> None:
             "all other non-Latvian posts do NOT qualify, even when they clearly discuss Latvia, "
             "ecommerce, Etsy, Shopify, WooCommerce, or alternatives. Do not translate a foreign "
             "post and then treat the translation itself as evidence of Latvian relevance. "
-            "Latvian relevance. A relevant lead must also have concrete buying, replacement, "
+            "A relevant lead must also have concrete buying, replacement, "
             "migration, setup, or implementation intent for an online store or ecommerce platform. "
             "Website work by itself is NOT relevant. WordPress development by itself is NOT "
             "relevant. Community management, accounting, generic business automation, news, jobs, "
