@@ -17,3 +17,19 @@ PRIMOVEZO_LEAD_KEYWORDS: tuple[tuple[str, str], ...] = (
     ("ecommerce", "migrācija no Shopify"),
     ("ecommerce", "migrācija no WooCommerce"),
 )
+
+
+# Broader Latvian discovery queries for finding useful ecommerce conversations,
+# not just posts that already contain explicit buying-intent wording.
+PRIMOVEZO_DISCOVERY_KEYWORDS: tuple[tuple[str, str], ...] = (
+    ("discovery", "Shopify"),
+    ("discovery", "WooCommerce"),
+    ("discovery", "Etsy"),
+    ("discovery", "interneta veikals"),
+    ("discovery", "internetveikals"),
+    ("discovery", "e-komercija"),
+    ("discovery", "e-veikals"),
+    ("discovery", "pārdot internetā"),
+    ("discovery", "veikals internetā"),
+    ("discovery", "online veikals"),
+)
