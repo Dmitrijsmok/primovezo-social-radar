@@ -3,7 +3,6 @@
 import subprocess
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -11,6 +10,7 @@ def test_daily_runner_shell_syntax():
     for relative in (
         "scripts/run-primovezo-daily.sh",
         "scripts/install-primovezo-daily-timer.sh",
+        "scripts/install-harken-command.sh",
     ):
         result = subprocess.run(
             ["bash", "-n", str(ROOT / relative)],
@@ -19,6 +19,14 @@ def test_daily_runner_shell_syntax():
             text=True,
         )
         assert result.returncode == 0, result.stderr
+
+
+def test_harken_command_installer_keeps_repo_context():
+    text = (ROOT / "scripts/install-harken-command.sh").read_text()
+    assert 'TARGET="$BIN_DIR/harken"' in text
+    assert 'cd "$ROOT"' in text
+    assert 'run harken "\\$@"' in text
+    assert "Try: harken logs" in text
 
 
 def test_daily_runner_is_locked_and_runs_primovezo_profile():

@@ -468,6 +468,94 @@ def test_leads_report_shows_one_unique_post_for_overlapping_queries(tmp_path):
     assert "e-komercijas platforma" in result.output
 
 
+def test_logs_is_shortcut_for_primovezo_leads_report(tmp_path):
+    db_path = tmp_path / "logs-alias.db"
+    with Store(db_path) as store:
+        lead = Mention(
+            source="bluesky",
+            query="Shopify alternatīva",
+            author="buyer.bsky.social",
+            text="Meklēju Shopify alternatīvu savam veikalam",
+            url="https://bsky.app/profile/buyer/post/1",
+            created_at=datetime(2026, 9, 23, tzinfo=timezone.utc),
+            lead_relevant=True,
+            lead_score=91,
+            lead_category="ecommerce",
+            lead_reason="Latvisks e-komercijas pieprasījums",
+            suggested_reply="Varu īsi parādīt Primovezo.",
+        )
+        store.upsert([lead])
+        store.save_lead_analysis([lead])
+
+    full = runner.invoke(cli.app, ["leads", "report", "--db", str(db_path)])
+    short = runner.invoke(cli.app, ["logs", "--db", str(db_path)])
+
+    assert full.exit_code == 0, full.output
+    assert short.exit_code == 0, short.output
+    assert short.output == full.output
+    assert "https://bsky.app/profile/buyer/post/1" in short.output
+
+
+def test_leads_reclassify_updates_existing_foreign_false_positive(tmp_path, monkeypatch):
+    db_path = tmp_path / "reclassify.db"
+    query = "Shopify alternatīva"
+    foreign = Mention(
+        source="bluesky",
+        query=query,
+        author="mayonice.bsky.social",
+        text="Bueno pues a buscar una alternativa a etsy 🙂",
+        url="https://bsky.app/profile/mayonice.bsky.social/post/1",
+        created_at=datetime(2026, 9, 23, tzinfo=timezone.utc),
+        lead_relevant=True,
+        lead_score=85,
+        lead_category="ecommerce",
+        lead_reason="Vecā klasifikācija",
+        suggested_reply="Vecais drafts",
+    )
+    with Store(db_path) as store:
+        store.upsert([foreign])
+        store.save_lead_analysis([foreign])
+
+    class LatviaProvider:
+        available = True
+
+        def complete(self, prompt, system=None, max_tokens=1024):
+            records = json.loads(prompt.split("\n\n")[-1])
+            return json.dumps(
+                {
+                    record["id"]: {
+                        "market_lv": False,
+                        "relevant": True,
+                        "score": 85,
+                        "category": "ecommerce",
+                        "reason_lv": "Ieraksts nav latviešu valodā.",
+                        "reply_lv": "Nevajadzētu tikt nosūtītam.",
+                    }
+                    for record in records
+                }
+            )
+
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setattr(cli, "get_provider", lambda name: LatviaProvider())
+
+    result = runner.invoke(
+        cli.app,
+        ["leads", "reclassify", "--db", str(db_path)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "reclassified 1 stored mention(s)" in result.output
+    assert "0 qualified Latvian lead match(es)" in result.output
+
+    with Store(db_path) as store:
+        row = store.lead_analysis(query, foreign.id)
+        assert row is not None
+        assert row["relevant"] is False
+        assert row["score"] == 49
+        assert row["category"] == "other"
+        assert row["suggested_reply"] == ""
+
+
 def test_leads_report_ignores_legacy_non_ecommerce_profile_queries(tmp_path):
     db_path = tmp_path / "legacy-leads.db"
     with Store(db_path) as store:
