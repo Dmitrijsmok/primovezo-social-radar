@@ -304,9 +304,7 @@ def test_bluesky_403_uses_slow_retry_backoff(tmp_path, monkeypatch):
                     "GET", "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts"
                 )
                 response = httpx.Response(403, request=request)
-                raise httpx.HTTPStatusError(
-                    "forbidden", request=request, response=response
-                )
+                raise httpx.HTTPStatusError("forbidden", request=request, response=response)
             return []
 
     delays = []
