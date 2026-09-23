@@ -198,6 +198,17 @@ harken leads reclassify
 
 This updates the stored lead analysis only and does not send a digest by itself.
 
+For a one-off bounded search of recent Latvian Bluesky posts, use:
+
+```bash
+harken leads recent --days 5
+harken logs
+```
+
+The recent scan uses Bluesky's time boundary and Latvian-language filter, stores and
+classifies matching posts, does not move the daily incremental cursor, and does not
+send email.
+
 A typical daily production flow is simply one scheduled invocation:
 
 ```bash
