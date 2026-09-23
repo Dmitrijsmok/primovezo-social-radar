@@ -32,6 +32,7 @@ from harken.alerts import (
     send_threshold_email,
 )
 from harken.analyze.insights import ThemeExtractor
+from harken.analyze.leads import classify_leads
 from harken.analyze.sentiment import LexiconSentiment
 from harken.auth import ROLES, hash_password, validate_password, validate_role, validate_username
 from harken.config import Config
@@ -542,6 +543,61 @@ def leads_report(
                 border_style="green",
             )
         )
+
+
+@app.command("logs")
+def primovezo_logs(
+    min_score: int = typer.Option(70, min=0, max=100, help="Minimum lead score to include."),
+    limit: int = typer.Option(50, min=1, max=500, help="Maximum unique leads to show."),
+    db: str = typer.Option(None, help="Database path (default: harken.db)."),
+):
+    """Shortcut for harken leads report."""
+    leads_report(min_score=min_score, limit=limit, db=db)
+
+
+@lead_app.command("reclassify")
+def leads_reclassify(
+    db: str = typer.Option(None, help="Database path (default: harken.db)."),
+):
+    """Reclassify stored Primovezo-profile mentions without fetching sources."""
+    cfg = Config()
+    if cfg.lead_llm_provider.strip().lower() in {"", "none", "null"}:
+        raise typer.BadParameter(
+            "Primovezo lead reclassification requires HARKEN_LEAD_LLM_PROVIDER.",
+            param_hint="HARKEN_LEAD_LLM_PROVIDER",
+        )
+    try:
+        provider = get_provider(cfg.lead_llm_provider)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="HARKEN_LEAD_LLM_PROVIDER") from exc
+    if not getattr(provider, "available", False):
+        raise typer.BadParameter(
+            "The configured lead LLM provider has no usable credentials.",
+            param_hint="HARKEN_LEAD_LLM_PROVIDER",
+        )
+
+    db_path = db or cfg.db_path
+    total = 0
+    relevant = 0
+    with Store(db_path) as store:
+        for _, query in PRIMOVEZO_LEAD_KEYWORDS:
+            mentions = store.mentions(query=query, limit=None)
+            if not mentions:
+                continue
+            classify_leads(mentions, provider)
+            store.save_lead_analysis(mentions)
+            total += len(mentions)
+            relevant += sum(
+                1
+                for mention in mentions
+                if mention.lead_relevant and (mention.lead_score or 0) >= cfg.lead_min_score
+            )
+
+    console.print(
+        f"[green]✓[/green] reclassified {total} stored mention(s) · "
+        f"{relevant} qualified Latvian lead match(es)"
+    )
+    console.print(f"Database: [cyan]{db_path}[/cyan]")
 
 
 @app.command()
