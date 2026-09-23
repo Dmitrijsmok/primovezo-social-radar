@@ -127,8 +127,10 @@ The runner scans a focused ecommerce-only Latvian intent profile. Website-only,
 WordPress-only, community-management, accounting, and generic automation requests
 are intentionally outside the Primovezo profile. It enables lead mode automatically,
 uses Bluesky by default, and waits 5 seconds between keywords to reduce burst
-throttling. Source-level retry/backoff still applies if Bluesky temporarily returns
-403. Override the source set when additional configured sources are available:
+throttling. For the Primovezo runner specifically, transient source failures get at
+least 3 retries; a Bluesky 403 uses a 10s, 20s, 40s exponential backoff. General
+Harken retry defaults remain unchanged. Override the source set when additional
+configured sources are available:
 
 ```bash
 harken leads primovezo --sources bluesky,threads
