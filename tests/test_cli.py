@@ -417,7 +417,7 @@ def test_leads_report_shows_one_unique_post_for_overlapping_queries(tmp_path):
     db_path = tmp_path / "leads-report.db"
     with Store(db_path) as store:
         rows = []
-        for query, score in (("interneta veikals", 90), ("e-komercijas platforma", 95)):
+        for query, score in (("meklēju interneta veikalu", 90), ("e-komercijas platforma", 95)):
             mention = Mention(
                 source="bluesky",
                 query=query,
@@ -443,8 +443,34 @@ def test_leads_report_shows_one_unique_post_for_overlapping_queries(tmp_path):
     assert result.exit_code == 0, result.output
     assert "Unique qualified leads: 1" in result.output
     assert "95/100" in result.output
-    assert "interneta veikals" in result.output
+    assert "meklēju interneta veikalu" in result.output
     assert "e-komercijas platforma" in result.output
+
+
+def test_leads_report_ignores_legacy_non_ecommerce_profile_queries(tmp_path):
+    db_path = tmp_path / "legacy-leads.db"
+    with Store(db_path) as store:
+        legacy = Mention(
+            source="bluesky",
+            query="meklēju mājaslapu",
+            author="legacy.bsky.social",
+            text="Meklēju mājaslapas izstrādātāju",
+            url="https://bsky.app/profile/legacy/post/1",
+            created_at=datetime(2026, 9, 23, tzinfo=timezone.utc),
+            lead_relevant=True,
+            lead_score=99,
+            lead_category="website",
+            lead_reason="Vecā profila klasifikācija",
+            suggested_reply="Vecs drafts",
+        )
+        store.upsert([legacy])
+        store.save_lead_analysis([legacy])
+
+    result = runner.invoke(cli.app, ["leads", "report", "--db", str(db_path)])
+
+    assert result.exit_code == 0
+    assert "No unique leads found" in result.output
+    assert "legacy.bsky.social" not in result.output
 
 
 def test_alert_command_can_send_synthetic_lead_email(monkeypatch):
