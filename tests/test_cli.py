@@ -325,7 +325,11 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
     )
 
     assert result.exit_code == 0, result.output
-    assert [query for query, *_ in calls] == [query for _, query in cli.PRIMOVEZO_LEAD_KEYWORDS]
+    expected_queries = [
+        query
+        for _, query in (*cli.PRIMOVEZO_LEAD_KEYWORDS, *cli.PRIMOVEZO_DISCOVERY_KEYWORDS)
+    ]
+    assert [query for query, *_ in calls] == expected_queries
     assert all(pages == 2 for _, pages, _, _, _, _, _, _ in calls)
     assert all(lead_enabled for _, _, lead_enabled, _, _, _, _, _ in calls)
     assert all(not fallback for _, _, _, fallback, _, _, _, _ in calls)
@@ -336,7 +340,7 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
     assert delays == [0.25] * (len(cli.PRIMOVEZO_LEAD_KEYWORDS) - 1)
     assert closed == [True]
     assert "Primovezo lead scan" in result.output
-    expected = len(cli.PRIMOVEZO_LEAD_KEYWORDS)
+    expected = len(cli.PRIMOVEZO_LEAD_KEYWORDS) + len(cli.PRIMOVEZO_DISCOVERY_KEYWORDS)
     assert f"{expected * 2} fetched" in result.output
     assert f"{expected} qualified match(es)" in result.output
     assert all(group == "ecommerce" for group, _ in cli.PRIMOVEZO_LEAD_KEYWORDS)
@@ -399,6 +403,80 @@ def test_primovezo_recent_scans_bounded_window_without_delivery(tmp_path, monkey
     assert all(kwargs["since_override"] is not None for _, kwargs in calls)
     assert "recent 5-day scan" in result.output
     assert "No email was sent" in result.output
+
+
+def test_primovezo_auto_enables_threads_when_token_is_configured(tmp_path, monkeypatch):
+    seen = []
+
+    class FakePipeline:
+        def __init__(self, config):
+            seen.append((tuple(config.sources), config.threads_access_token))
+
+        def track(self, query, pages=3):
+            return SimpleNamespace(
+                errors={},
+                retry_counts={},
+                lead_analysis_error=None,
+                lead_candidates=0,
+                lead_candidate_mentions=[],
+                fetched=0,
+                new=0,
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-token")
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
+
+    result = runner.invoke(
+        cli.app,
+        ["leads", "primovezo", "--delay", "0", "--db", str(tmp_path / "auto.db")],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen == [(("bluesky", "threads"), "threads-token")]
+
+
+def test_primovezo_recent_auto_enables_threads_when_token_is_configured(
+    tmp_path, monkeypatch
+):
+    seen = []
+
+    class FakePipeline:
+        def __init__(self, config):
+            seen.append((tuple(config.sources), config.threads_access_token))
+
+        def track(self, query, **kwargs):
+            return SimpleNamespace(
+                errors={},
+                retry_counts={},
+                lead_analysis_error=None,
+                lead_candidates=0,
+                lead_candidate_mentions=[],
+                fetched=0,
+                new=0,
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-token")
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
+
+    result = runner.invoke(
+        cli.app,
+        ["leads", "recent", "--days", "5", "--delay", "0", "--db", str(tmp_path / "recent.db")],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen == [(("bluesky", "threads"), "threads-token")]
 
 
 def test_primovezo_runner_rejects_reddit(monkeypatch):
