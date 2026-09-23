@@ -28,6 +28,8 @@ from harken.analyze.sentiment import LexiconSentiment
 from harken.auth import ROLES, hash_password, validate_password, validate_role, validate_username
 from harken.config import Config
 from harken.evaluate import evaluate_sentiment, load_sentiment_dataset
+from harken.lead_profiles import PRIMOVEZO_LEAD_KEYWORDS
+from harken.llm import get_provider
 from harken.models import Mention, Sentiment
 from harken.observability import configure_logging
 from harken.pipeline import Pipeline
@@ -44,6 +46,8 @@ project_app = typer.Typer(help="Group tracked keywords and report across them.")
 app.add_typer(project_app, name="project")
 user_app = typer.Typer(help="Manage opt-in local dashboard accounts and roles.")
 app.add_typer(user_app, name="user")
+lead_app = typer.Typer(help="Run focused commercial lead-monitoring profiles.")
+app.add_typer(lead_app, name="leads")
 console = Console()
 
 
@@ -126,7 +130,7 @@ def track(
             console.print(f"  [yellow]![/yellow] optional LLM labels: {result.analysis_error}")
         if result.sentiment_error:
             console.print(f"  [yellow]![/yellow] sentiment: {result.sentiment_error}")
-        _print_alert_result(result)
+        _print_alert_result(result, lead_mode=cfg.lead_enabled)
         console.print(
             f"[green]✓[/green] {result.fetched} fetched · [bold]{result.new}[/bold] new · "
             f"{sum(result.by_source.values())} matched"
@@ -232,7 +236,7 @@ def watch(
                     )
                 if result.sentiment_error:
                     console.print(f"  [yellow]![/yellow] sentiment: {result.sentiment_error}")
-                _print_alert_result(result)
+                _print_alert_result(result, lead_mode=cfg.lead_enabled)
                 console.print(
                     f"[green]✓[/green] scan {completed}: {result.fetched} fetched · "
                     f"[bold]{result.new}[/bold] new"
@@ -244,6 +248,157 @@ def watch(
         console.print("\n[dim]Stopped watching.[/dim]")
     finally:
         pipe.close()
+
+
+@lead_app.command("primovezo")
+def leads_primovezo(
+    sources: str = typer.Option(
+        "bluesky",
+        help="Comma-separated sources for the profile (default: bluesky).",
+    ),
+    limit: int = typer.Option(50, min=1, max=100, help="Max items per source and keyword."),
+    pages: int = typer.Option(
+        3, min=1, max=20, help="Max continuation pages when a keyword has fallen behind."
+    ),
+    delay: float = typer.Option(
+        5.0,
+        min=0.0,
+        max=300.0,
+        help="Seconds to wait between keywords to avoid source burst throttling.",
+    ),
+    db: str = typer.Option(None, help="Database path (default: harken.db)."),
+):
+    """Scan the built-in Primovezo Latvian commercial-intent keyword profile."""
+    cfg = _tracking_config(sources, limit, db)
+    cfg.lead_enabled = True
+    if cfg.lead_llm_provider.strip().lower() in {"", "none", "null"}:
+        raise typer.BadParameter(
+            "Primovezo lead scanning requires HARKEN_LEAD_LLM_PROVIDER.",
+            param_hint="HARKEN_LEAD_LLM_PROVIDER",
+        )
+    try:
+        provider = get_provider(cfg.lead_llm_provider)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="HARKEN_LEAD_LLM_PROVIDER") from exc
+    if not getattr(provider, "available", False):
+        raise typer.BadParameter(
+            "The configured lead LLM provider has no usable credentials.",
+            param_hint="HARKEN_LEAD_LLM_PROVIDER",
+        )
+    # A focused sales runner must never turn an LLM outage into a burst of raw
+    # keyword notifications. Mentions are still stored; only delivery is strict.
+    cfg.lead_fallback_alerts = False
+
+    keywords = PRIMOVEZO_LEAD_KEYWORDS
+    console.print(
+        Panel.fit(
+            f"[bold]Primovezo lead radar[/bold]\n"
+            f"{len(keywords)} Latvian intent keywords · {', '.join(cfg.sources)} · "
+            f"lead threshold {cfg.lead_min_score}",
+            border_style="cyan",
+        )
+    )
+    if not cfg.email_to and not cfg.webhook_url:
+        console.print(
+            "[yellow]![/yellow] No email/webhook transport configured; "
+            "qualified leads will be stored but not pushed."
+        )
+
+    rows: list[tuple[str, str, int, int, int, str, int, int]] = []
+    total_fetched = 0
+    total_new = 0
+    total_leads = 0
+    total_alerted = 0
+    failed_keywords = 0
+    lead_fallbacks = 0
+    pipe = Pipeline(cfg)
+    try:
+        for index, (group, query) in enumerate(keywords, start=1):
+            console.print(f"[dim]{index}/{len(keywords)}[/dim] [bold]{group}[/bold] · “{query}”")
+            try:
+                result = pipe.track(query, pages=pages)
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:
+                failed_keywords += 1
+                rows.append((group, query, 0, 0, 0, f"error: {type(exc).__name__}", 0, 0))
+                console.print(f"  [red]✗[/red] {type(exc).__name__}: {exc}")
+            else:
+                for source, err in result.errors.items():
+                    console.print(f"  [yellow]![/yellow] {source}: {err}")
+                _print_retries(result)
+                _print_alert_result(result, lead_mode=True)
+
+                source_count = len({name for name in cfg.sources if name.strip()})
+                if source_count and len(result.errors) == source_count:
+                    failed_keywords += 1
+                if result.lead_analysis_error:
+                    lead_fallbacks += 1
+                    console.print(
+                        f"  [yellow]![/yellow] lead classifier: {result.lead_analysis_error}"
+                    )
+                    ai_state = "fallback"
+                elif result.new:
+                    ai_state = "classified"
+                else:
+                    ai_state = "no new"
+
+                retries = sum(result.retry_counts.values())
+                rows.append(
+                    (
+                        group,
+                        query,
+                        result.fetched,
+                        result.new,
+                        retries,
+                        ai_state,
+                        result.lead_candidates,
+                        result.alerted,
+                    )
+                )
+                total_fetched += result.fetched
+                total_new += result.new
+                total_leads += result.lead_candidates
+                total_alerted += result.alerted
+
+            if index < len(keywords) and delay:
+                time.sleep(delay)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Primovezo lead scan stopped.[/dim]")
+        raise typer.Exit(130) from None
+    finally:
+        pipe.close()
+
+    table = Table(title="Primovezo lead scan")
+    table.add_column("group")
+    table.add_column("keyword", style="bold")
+    table.add_column("fetched", justify="right")
+    table.add_column("new", justify="right")
+    table.add_column("retries", justify="right")
+    table.add_column("AI")
+    table.add_column("leads", justify="right")
+    table.add_column("alerts", justify="right")
+    for group, query, fetched, new, retries, ai_state, leads, alerted in rows:
+        table.add_row(
+            group,
+            query,
+            str(fetched),
+            str(new),
+            str(retries),
+            ai_state,
+            str(leads),
+            str(alerted),
+        )
+    console.print(table)
+    console.print(
+        f"[green]✓[/green] {total_fetched} fetched · [bold]{total_new}[/bold] new · "
+        f"{total_leads} qualified lead(s) · {total_alerted} delivered alert(s) · "
+        f"{lead_fallbacks} classifier fallback(s)"
+    )
+    console.print(f"Database: [cyan]{cfg.db_path}[/cyan]")
+
+    if failed_keywords == len(keywords):
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -835,9 +990,10 @@ def _email_settings(config: Config) -> EmailSettings | None:
     )
 
 
-def _print_alert_result(result) -> None:
+def _print_alert_result(result, *, lead_mode: bool = False) -> None:
     if result.alerted:
-        console.print(f"  [green]↗[/green] delivered {result.alerted} negative-mention alerts")
+        label = "lead" if lead_mode else "negative-mention"
+        console.print(f"  [green]↗[/green] delivered {result.alerted} {label} alerts")
     if result.alert_error:
         pending_count = result.alert_pending + result.threshold_pending
         pending = f" ({pending_count} queued for retry)" if pending_count else ""

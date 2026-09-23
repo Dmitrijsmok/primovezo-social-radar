@@ -6,6 +6,7 @@ live source. `_serve` (which blocks on uvicorn.run) is stubbed out.
 
 import csv
 import json
+from types import SimpleNamespace
 
 import httpx
 import respx
@@ -246,6 +247,89 @@ def test_track_can_assign_new_keyword_to_project(tmp_path):
     with Store(db) as store:
         assert store.queries(project_id=project["id"]) == ["project-only"]
         assert "project-only" not in store.queries(project_id=1)
+
+
+def test_primovezo_lead_runner_requires_llm_provider(tmp_path):
+    result = runner.invoke(
+        cli.app,
+        ["leads", "primovezo", "--db", str(tmp_path / "leads.db"), "--delay", "0"],
+    )
+    assert result.exit_code != 0
+    assert "HARKEN_LEAD_LLM_PROVIDER" in result.output
+
+
+def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
+    calls = []
+    delays = []
+    closed = []
+
+    class FakePipeline:
+        def __init__(self, config):
+            self.config = config
+
+        def track(self, query, pages=3):
+            calls.append(
+                (
+                    query,
+                    pages,
+                    self.config.lead_enabled,
+                    self.config.lead_fallback_alerts,
+                    tuple(self.config.sources),
+                )
+            )
+            return SimpleNamespace(
+                errors={},
+                retry_counts={},
+                lead_analysis_error=None,
+                lead_candidates=1,
+                alert_error=None,
+                alert_pending=0,
+                threshold_pending=0,
+                alerted=0,
+                threshold_alerted=0,
+                threshold_events=[],
+                fetched=2,
+                new=1,
+            )
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli.time, "sleep", delays.append)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "leads",
+            "primovezo",
+            "--sources",
+            "bluesky",
+            "--limit",
+            "10",
+            "--pages",
+            "2",
+            "--delay",
+            "0.25",
+            "--db",
+            str(tmp_path / "leads.db"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert [query for query, *_ in calls] == [query for _, query in cli.PRIMOVEZO_LEAD_KEYWORDS]
+    assert all(pages == 2 for _, pages, _, _, _ in calls)
+    assert all(lead_enabled for _, _, lead_enabled, _, _ in calls)
+    assert all(not fallback for _, _, _, fallback, _ in calls)
+    assert all(sources == ("bluesky",) for _, _, _, _, sources in calls)
+    assert delays == [0.25] * (len(cli.PRIMOVEZO_LEAD_KEYWORDS) - 1)
+    assert closed == [True]
+    assert "Primovezo lead scan" in result.output
+    assert "18 fetched" not in result.output
+    assert "36 fetched" in result.output
+    assert "18 qualified lead(s)" in result.output
 
 
 def test_version_flag():

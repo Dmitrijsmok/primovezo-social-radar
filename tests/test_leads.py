@@ -112,6 +112,7 @@ def test_pipeline_persists_lead_analysis_for_new_mentions(tmp_path, monkeypatch)
 
     assert result.new == 2
     assert result.lead_analysis_error is None
+    assert result.lead_candidates == 1
 
     mentions = pipe.store.mentions("interneta veikals", limit=None)
     lead_id = next(m.id for m in mentions if "need" in m.text.lower())
@@ -179,4 +180,60 @@ def test_lead_alerts_are_deduped_across_keywords(tmp_path, monkeypatch):
     assert second.alerted == 0
     assert second.alert_pending == 0
     assert len(deliveries) == 1
+    pipe.close()
+
+
+def test_strict_lead_mode_does_not_alert_raw_matches_on_classifier_failure(tmp_path, monkeypatch):
+    from harken.sources import REGISTRY
+
+    class LeadSource:
+        def __init__(self, **options):
+            pass
+
+        def fetch(self, query, limit=50):
+            return [
+                Mention(
+                    source="strict-lead",
+                    query=query,
+                    text="I need an ecommerce platform",
+                    url="https://example.test/strict-lead",
+                    created_at=datetime.now(timezone.utc),
+                )
+            ]
+
+    class BrokenProvider:
+        available = True
+
+        def complete(self, *args, **kwargs):
+            raise RuntimeError("provider offline")
+
+    deliveries = []
+    monkeypatch.setitem(REGISTRY, "strict-lead", LeadSource)
+    monkeypatch.setattr("harken.pipeline.get_provider", lambda name: BrokenProvider())
+    monkeypatch.setattr(
+        "harken.pipeline.send_lead_email",
+        lambda settings, query, mentions: deliveries.append(mentions),
+    )
+
+    pipe = Pipeline(
+        Config(
+            db_path=str(tmp_path / "strict-leads.db"),
+            sources=["strict-lead"],
+            lead_enabled=True,
+            lead_llm_provider="test",
+            lead_fallback_alerts=False,
+            email_to=["ops@example.test"],
+            email_from="harken@example.test",
+            smtp_host="smtp.example.test",
+            smtp_security="none",
+        )
+    )
+    result = pipe.track("interneta veikals")
+
+    assert result.new == 1
+    assert result.lead_analysis_error is not None
+    assert result.lead_candidates == 0
+    assert result.alerted == 0
+    assert result.alert_pending == 0
+    assert deliveries == []
     pipe.close()

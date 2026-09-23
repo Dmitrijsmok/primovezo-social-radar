@@ -144,6 +144,9 @@ class Config:
     lead_min_score: int = field(
         default_factory=lambda: _nonnegative_env_int("HARKEN_LEAD_MIN_SCORE", 70)
     )
+    lead_fallback_alerts: bool = field(
+        default_factory=lambda: _bool_env("HARKEN_LEAD_FALLBACK_ALERTS", True)
+    )
     # source-specific options
     mastodon_instance: str = field(
         default_factory=lambda: os.getenv("HARKEN_MASTODON_INSTANCE", "mastodon.social")
