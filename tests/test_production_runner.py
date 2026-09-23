@@ -39,4 +39,5 @@ def test_production_docs_keep_email_internal_only():
     text = (ROOT / "docs/primovezo-production.md").read_text()
     assert "internal" in text.lower()
     assert "never contacts a prospect automatically" in text
-    assert "harken test-alert --transport email --kind lead" in text
+    assert "HARKEN_RESEND_FROM=noreply@primovezo.com" in text
+    assert "harken test-alert --transport resend --kind lead" in text
