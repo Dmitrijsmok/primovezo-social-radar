@@ -1023,7 +1023,7 @@ def test_alert(
                 if selected == "webhook":
                     send_lead_alert(url or "", mention.query, [mention])
                 else:
-                    send_lead_email(email_settings, mention.query, [mention])
+                    send_lead_digest_email(email_settings, [mention])
             else:
                 mention = Mention(
                     source="harken",
