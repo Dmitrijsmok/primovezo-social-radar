@@ -1117,6 +1117,33 @@ class Store:
             )
             return [_row_to_mention(row) for row in cur.fetchall()]
 
+    def pending_alerts_for_target(
+        self, target_key: str, limit: int = 100
+    ) -> list[Mention]:
+        """Return undelivered mentions across queries for one delivery target."""
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(
+                """
+                SELECT m.*,
+                       l.relevant AS lead_relevant,
+                       l.score AS lead_score,
+                       l.category AS lead_category,
+                       l.reason AS lead_reason,
+                       l.suggested_reply AS suggested_reply
+                FROM alert_outbox AS a
+                JOIN mentions AS m ON m.query = a.query AND m.id = a.mention_id
+                LEFT JOIN lead_analysis AS l
+                  ON l.query = m.query AND l.mention_id = m.id
+                WHERE a.target_key = ? AND a.delivered_at IS NULL
+                ORDER BY a.enqueued_at, a.mention_id
+                LIMIT ?
+                """,
+                (target_key, limit),
+            )
+            return [_row_to_mention(row) for row in cur.fetchall()]
+
     def mark_alerts_delivered(self, query: str, ids: list[str], target_key: str) -> None:
         """Mark one successfully delivered batch."""
         self._update_alert_batch(query, ids, target_key, delivered=True)
