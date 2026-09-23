@@ -13,6 +13,7 @@ from harken.alerts import (
     EmailSettings,
     WebhookDeliveryError,
     email_target_key,
+    send_lead_digest_email,
     send_negative_alert,
     send_negative_email,
     send_threshold_alert,
@@ -158,6 +159,41 @@ def test_negative_email_uses_starttls_auth_and_safe_headers(monkeypatch):
     )
     assert email_target_key(reordered) == first_key
     assert "secret" not in first_key
+
+
+def test_internal_lead_digest_email_marks_draft_as_unsent(monkeypatch):
+    SMTPRecorder.instances = []
+    monkeypatch.setattr(alerts.smtplib, "SMTP", SMTPRecorder)
+    settings = EmailSettings(
+        host="smtp.example.test",
+        port=587,
+        sender="radar@example.test",
+        recipients=("owner@example.test",),
+        security="none",
+    )
+    mention = Mention(
+        source="bluesky",
+        query="interneta veikals",
+        author="buyer.bsky.social",
+        text="Meklēju e-komercijas platformu interneta veikalam",
+        url="https://bsky.app/profile/buyer/post/1",
+        created_at=datetime(2026, 9, 23, tzinfo=timezone.utc),
+        lead_relevant=True,
+        lead_score=94,
+        lead_category="ecommerce",
+        lead_reason="Konkrēts e-komercijas pieprasījums",
+        suggested_reply="Sveiki! Varu īsi parādīt Primovezo.",
+    )
+
+    send_lead_digest_email(settings, [mention])
+
+    message = SMTPRecorder.instances[0].messages[0][0]
+    assert message["To"] == "owner@example.test"
+    assert message["Subject"] == "[Primovezo Social Radar] 1 new ecommerce lead"
+    body = message.get_content()
+    assert "Draft reply (not sent automatically)" in body
+    assert "buyer.bsky.social" in body
+    assert "https://bsky.app/profile/buyer/post/1" in body
 
 
 def test_threshold_email_supports_implicit_tls(monkeypatch):
