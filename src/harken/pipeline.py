@@ -19,6 +19,8 @@ import httpx
 from harken.alerts import (
     EmailSettings,
     email_target_key,
+    send_lead_alert,
+    send_lead_email,
     send_negative_alert,
     send_negative_email,
     send_threshold_alert,
@@ -26,6 +28,7 @@ from harken.alerts import (
     webhook_target_key,
 )
 from harken.analyze.insights import Theme, ThemeExtractor
+from harken.analyze.leads import classify_leads
 from harken.analyze.sentiment import LexiconSentiment
 from harken.config import Config
 from harken.llm import get_provider
@@ -50,6 +53,7 @@ class TrackResult:
     errors: dict[str, str] = field(default_factory=dict)
     themes: list[Theme] = field(default_factory=list)
     sentiment_error: str | None = None
+    lead_analysis_error: str | None = None
     analysis_error: str | None = None
     alerted: int = 0
     alert_pending: int = 0
@@ -177,19 +181,40 @@ class Pipeline:
         result.sentiment_error = self._analyze_sentiment(collected)
 
         existing_ids = self.store.existing_ids(query, [mention.id for mention in collected])
-        new_negative = list(
+        new_mentions = list(
             {
                 mention.id: mention
                 for mention in collected
-                if not backfill
-                and mention.id not in existing_ids
-                and mention.sentiment is Sentiment.NEGATIVE
+                if not backfill and mention.id not in existing_ids
             }.values()
         )
+
+        if self.config.lead_enabled:
+            # Classify only newly discovered mentions. Re-scans stay cheap, and
+            # backfill does not unexpectedly consume an LLM quota.
+            result.lead_analysis_error = self._analyze_leads(new_mentions)
+            if result.lead_analysis_error:
+                # Never create a blind spot because an AI provider is down or
+                # misconfigured. Raw keyword matches are still delivered.
+                alert_mentions = new_mentions
+            else:
+                alert_mentions = [
+                    mention
+                    for mention in new_mentions
+                    if mention.lead_relevant
+                    and (mention.lead_score or 0) >= self.config.lead_min_score
+                ]
+        else:
+            alert_mentions = [
+                mention for mention in new_mentions if mention.sentiment is Sentiment.NEGATIVE
+            ]
+
         result.fetched = len(collected)
         # Pre-cluster ingest: these mentions carry no theme yet, so preserve any
         # existing labels here; themes are (re)clustered and written below.
         result.new = self.store.upsert(collected, update_theme=False)
+        if self.config.lead_enabled:
+            self.store.save_lead_analysis(new_mentions)
         for name, (mentions, next_cursor, incremental_since) in successful.items():
             self.store.record_source_success(
                 query,
@@ -206,7 +231,7 @@ class Pipeline:
         result.analysis_error = self._maybe_llm_label(themes, stored)
         self.store.upsert(stored)  # write theme labels back
         result.themes = themes
-        self._deliver_alerts(query, new_negative, result, evaluate_metrics=not backfill)
+        self._deliver_alerts(query, alert_mentions, result, evaluate_metrics=not backfill)
         log_event(
             logger,
             "track_complete",
@@ -343,9 +368,11 @@ class Pipeline:
                 targets.append(
                     _AlertTarget(
                         name="webhook",
-                        key=key,
-                        send_mentions=lambda query, mentions: send_negative_alert(
-                            url, query, mentions
+                        key=("lead-" + key) if self.config.lead_enabled else key,
+                        send_mentions=(
+                            (lambda query, mentions: send_lead_alert(url, query, mentions))
+                            if self.config.lead_enabled
+                            else (lambda query, mentions: send_negative_alert(url, query, mentions))
                         ),
                         send_threshold=lambda text, payload: send_threshold_alert(
                             url, text, payload
@@ -373,9 +400,15 @@ class Pipeline:
                 targets.append(
                     _AlertTarget(
                         name="email",
-                        key=key,
-                        send_mentions=lambda query, mentions: send_negative_email(
-                            settings, query, mentions
+                        key=("lead-" + key) if self.config.lead_enabled else key,
+                        send_mentions=(
+                            (lambda query, mentions: send_lead_email(settings, query, mentions))
+                            if self.config.lead_enabled
+                            else (
+                                lambda query, mentions: send_negative_email(
+                                    settings, query, mentions
+                                )
+                            )
                         ),
                         send_threshold=lambda text, payload: send_threshold_email(
                             settings, text, payload
@@ -448,6 +481,29 @@ class Pipeline:
                 "sentiment_fallback",
                 level=logging.WARNING,
                 provider=self.config.llm_provider,
+                reason_type=type(exc).__name__,
+            )
+            return safe_error
+
+    def _analyze_leads(self, mentions: list[Mention]) -> str | None:
+        if not mentions:
+            return None
+        try:
+            provider = get_provider(self.config.lead_llm_provider)
+            if not getattr(provider, "available", False):
+                raise RuntimeError(
+                    f"{self.config.lead_llm_provider} provider is unavailable; "
+                    "check its credentials"
+                )
+            classify_leads(mentions, provider)
+            return None
+        except Exception as exc:
+            safe_error = f"LLM lead classification unavailable: {type(exc).__name__}: {exc}"
+            log_event(
+                logger,
+                "lead_classification_fallback",
+                level=logging.WARNING,
+                provider=self.config.lead_llm_provider,
                 reason_type=type(exc).__name__,
             )
             return safe_error

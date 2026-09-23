@@ -4,10 +4,10 @@
 
 **Self-hosted social listening — hear what the internet says about you, on your own box.**
 
-Track a keyword, brand, or product across Hacker News, Reddit, Mastodon, Bluesky, Stack Overflow, RSS, X, and YouTube.
+Track a keyword, brand, or product across Hacker News, Reddit, Mastodon, Bluesky, Stack Overflow, RSS, Threads, X, and YouTube.
 Get sentiment and themes in a clean local dashboard. No Harken account, telemetry, or per-seat pricing — the database stays on your machine.
 
-[![CI](https://github.com/VladUZH/harken/actions/workflows/ci.yml/badge.svg)](https://github.com/VladUZH/harken/actions/workflows/ci.yml)
+[![CI](https://github.com/Dmitrijsmok/primovezo-social-radar/actions/workflows/ci.yml/badge.svg)](https://github.com/Dmitrijsmok/primovezo-social-radar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-4ec9b0.svg)](https://www.python.org/)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-d8a657.svg)](#contributing)
@@ -20,6 +20,9 @@ Get sentiment and themes in a clean local dashboard. No Harken account, telemetr
 
 ---
 
+> **Primovezo fork:** keeps Harken's MIT-licensed social-listening core and adds
+> Threads keyword search plus an optional commercial lead-radar workflow.
+
 ## Why Harken
 
 Brand-monitoring tools like Brand24 and Mention are capable — and closed, cloud-only, and now priced in the **hundreds of dollars per month**. They ingest everything you track into their servers. For indie founders, OSS maintainers, and privacy-conscious teams, that's often backwards.
@@ -30,7 +33,7 @@ Harken does the core job those tools do — **"what are people saying about X, a
 - **🔓 Open source (MIT).** Read it, fork it, extend it. No lock-in.
 - **🆓 Free, and zero-config.** `harken demo` works on a clean clone with **no API key and no signup**.
 - **🧩 LLM-agnostic.** Sentiment and themes work with **no model at all** (transparent local analysis). Want richer theme labels? Plug in Anthropic, OpenAI, *or a fully-local Ollama* — your choice, swappable in one env var.
-- **🌐 Free sources first.** Hacker News and Bluesky are the no-credential defaults; Stack Overflow is another no-key option, while Reddit, Mastodon, RSS, X, and YouTube are available when configured.
+- **🌐 Free sources first.** Hacker News and Bluesky are the no-credential defaults; Stack Overflow is another no-key option, while Reddit, Mastodon, RSS, Threads, X, and YouTube are available when configured.
 
 ## The problem
 
@@ -59,8 +62,8 @@ Harken is the small, honest, self-hosted version: point it at a keyword, and it 
 Requires Python 3.10+. (Examples use [`uv`](https://github.com/astral-sh/uv); plain `pip` works too.)
 
 ```bash
-git clone https://github.com/VladUZH/harken
-cd harken
+git clone https://github.com/Dmitrijsmok/primovezo-social-radar
+cd primovezo-social-radar
 uv venv && uv pip install -e .
 
 # 1. See the whole thing on bundled sample data — no key, no network:
@@ -76,6 +79,61 @@ harken serve            # open the dashboard at http://localhost:8042
 That's it for the default sources. No account, key, or config file is required.
 
 > Want richer theme names from an LLM? It's optional — copy `.env.example` to `.env` and set `HARKEN_LLM_PROVIDER` to `anthropic`, `openai`, or `ollama` (local). Everything still works without it.
+
+### Primovezo lead-radar mode
+
+This fork adds an optional commercial-intent layer without replacing Harken's
+normal sentiment workflow. Only newly discovered mentions are sent to the LLM.
+Backfill stays local and does not consume LLM quota.
+
+Example with Gemini's OpenAI-compatible endpoint:
+
+```dotenv
+HARKEN_LEAD_ENABLED=true
+HARKEN_LEAD_MIN_SCORE=70
+
+HARKEN_LEAD_LLM_PROVIDER=openai
+HARKEN_LLM_API_KEY=<GEMINI_API_KEY>
+HARKEN_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+HARKEN_LLM_MODEL=gemini-3.8-flash
+
+HARKEN_SOURCES=bluesky,threads
+HARKEN_THREADS_ACCESS_TOKEN=<THREADS_TOKEN>
+```
+
+A relevant mention is enriched with:
+
+```text
+relevant
+lead_score 0..100
+category
+reason_lv
+suggested_reply
+```
+
+When email or webhook alerts are configured, only lead candidates at or above
+`HARKEN_LEAD_MIN_SCORE` are delivered. If the LLM is unavailable or returns an
+invalid response, new raw keyword matches are delivered instead so monitoring
+does not silently go blind.
+
+A practical Latvian starter set:
+
+```bash
+harken track "meklēju interneta veikalu"
+harken track "vajag interneta veikalu"
+harken track "interneta veikala izstrāde"
+harken track "meklēju mājaslapas izstrādātāju"
+harken track "vajag mājaslapu"
+harken track "Shopify alternatīva"
+harken track "WooCommerce alternatīva"
+harken track "apsaimniekošanas programma"
+harken track "iedzīvotāju portāls"
+harken track "Bill.me alternatīva"
+```
+
+Threads uses Meta's official keyword-search API and requires a user access token
+with the `threads_keyword_search` permission. The access token is sent in the
+Authorization header rather than the query string.
 
 ### Keep listening
 

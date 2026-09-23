@@ -44,6 +44,14 @@ class Mention(BaseModel):
     sentiment_score: float | None = None  # signed, roughly [-1, 1]
     theme: str | None = None
 
+    # Optional Primovezo lead-radar enrichment. These fields are persisted in
+    # a separate table so upstream Harken's mention schema stays easy to sync.
+    lead_relevant: bool | None = None
+    lead_score: int | None = None
+    lead_category: str | None = None
+    lead_reason: str | None = None
+    suggested_reply: str | None = None
+
     @field_validator("created_at")
     @classmethod
     def _ensure_tz_aware(cls, value: datetime) -> datetime:

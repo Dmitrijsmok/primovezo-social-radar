@@ -120,6 +120,23 @@ CREATE TABLE IF NOT EXISTS source_metrics (
 );
 """
 
+_LEAD_SCHEMA = """
+CREATE TABLE IF NOT EXISTS lead_analysis (
+    mention_id       TEXT NOT NULL,
+    query            TEXT NOT NULL,
+    relevant         INTEGER NOT NULL,
+    score            INTEGER NOT NULL,
+    category         TEXT NOT NULL,
+    reason           TEXT NOT NULL,
+    suggested_reply  TEXT,
+    analyzed_at      TEXT NOT NULL,
+    PRIMARY KEY (mention_id, query),
+    FOREIGN KEY (mention_id, query) REFERENCES mentions(id, query) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_lead_analysis_relevance
+    ON lead_analysis(query, relevant, score);
+"""
+
 DEFAULT_PROJECT_ID = 1
 
 _PROJECT_SCHEMA = """
@@ -166,7 +183,7 @@ CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
 # Bumped when the on-disk schema or a one-time reconciliation step changes.
 # Stored in `PRAGMA user_version` so _ensure_schema() can skip the expensive
 # whole-table reconciliation on every connection once a DB is up to date.
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 
 class Store:
@@ -202,6 +219,7 @@ class Store:
                     + _TRACKING_SCHEMA
                     + _THRESHOLD_ALERT_SCHEMA
                     + _SOURCE_METRICS_SCHEMA
+                    + _LEAD_SCHEMA
                     + _PROJECT_SCHEMA
                     + _AUTH_SCHEMA
                 )
@@ -235,6 +253,7 @@ class Store:
                 + _TRACKING_SCHEMA
                 + _THRESHOLD_ALERT_SCHEMA
                 + _SOURCE_METRICS_SCHEMA
+                + _LEAD_SCHEMA
                 + _PROJECT_SCHEMA
                 + _AUTH_SCHEMA
             )
@@ -612,6 +631,61 @@ class Store:
         self._conn.commit()
         return new
 
+    def save_lead_analysis(self, mentions: list[Mention]) -> int:
+        """Persist lead-radar enrichment for mentions that were successfully classified."""
+        now = datetime.now(timezone.utc).isoformat()
+        saved = 0
+        with closing(self._conn.cursor()) as cur:
+            for mention in mentions:
+                if mention.lead_relevant is None or mention.lead_score is None:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO lead_analysis
+                        (mention_id, query, relevant, score, category, reason,
+                         suggested_reply, analyzed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(mention_id, query) DO UPDATE SET
+                        relevant = excluded.relevant,
+                        score = excluded.score,
+                        category = excluded.category,
+                        reason = excluded.reason,
+                        suggested_reply = excluded.suggested_reply,
+                        analyzed_at = excluded.analyzed_at
+                    """,
+                    (
+                        mention.id,
+                        mention.query,
+                        int(mention.lead_relevant),
+                        mention.lead_score,
+                        mention.lead_category or "other",
+                        mention.lead_reason or "",
+                        mention.suggested_reply,
+                        now,
+                    ),
+                )
+                saved += 1
+        self._conn.commit()
+        return saved
+
+    def lead_analysis(self, query: str, mention_id: str) -> dict | None:
+        """Return persisted lead enrichment for one mention."""
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(
+                """
+                SELECT relevant, score, category, reason, suggested_reply, analyzed_at
+                FROM lead_analysis
+                WHERE query = ? AND mention_id = ?
+                """,
+                (query, mention_id),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        value = dict(row)
+        value["relevant"] = bool(value["relevant"])
+        return value
+
     def save_tracking(
         self, query: str, sources: list[str], *, project_id: int | None = None
     ) -> None:
@@ -931,9 +1005,16 @@ class Store:
         with closing(self._conn.cursor()) as cur:
             cur.execute(
                 """
-                SELECT m.*
+                SELECT m.*,
+                       l.relevant AS lead_relevant,
+                       l.score AS lead_score,
+                       l.category AS lead_category,
+                       l.reason AS lead_reason,
+                       l.suggested_reply AS suggested_reply
                 FROM alert_outbox AS a
                 JOIN mentions AS m ON m.query = a.query AND m.id = a.mention_id
+                LEFT JOIN lead_analysis AS l
+                  ON l.query = m.query AND l.mention_id = m.id
                 WHERE a.query = ? AND a.target_key = ? AND a.delivered_at IS NULL
                 ORDER BY a.enqueued_at, a.mention_id
                 LIMIT ?
@@ -1421,6 +1502,10 @@ def _before_filter(
 
 
 def _row_to_mention(r: sqlite3.Row) -> Mention:
+    keys = set(r.keys())
+    lead_relevant = None
+    if "lead_relevant" in keys and r["lead_relevant"] is not None:
+        lead_relevant = bool(r["lead_relevant"])
     return Mention(
         id=r["id"],
         source=r["source"],
@@ -1434,6 +1519,11 @@ def _row_to_mention(r: sqlite3.Row) -> Mention:
         sentiment=Sentiment(r["sentiment"]) if r["sentiment"] else None,
         sentiment_score=r["sentiment_score"],
         theme=r["theme"],
+        lead_relevant=lead_relevant,
+        lead_score=r["lead_score"] if "lead_score" in keys else None,
+        lead_category=r["lead_category"] if "lead_category" in keys else None,
+        lead_reason=r["lead_reason"] if "lead_reason" in keys else None,
+        suggested_reply=r["suggested_reply"] if "suggested_reply" in keys else None,
     )
 
 

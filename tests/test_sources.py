@@ -10,6 +10,7 @@ from harken.sources.bluesky import BlueskySource
 from harken.sources.hackernews import HackerNewsSource
 from harken.sources.reddit import RedditSource
 from harken.sources.stackoverflow import StackOverflowSource
+from harken.sources.threads import ThreadsSource
 from harken.sources.x import XSource
 from harken.sources.youtube import YouTubeSource
 
@@ -269,6 +270,50 @@ def test_youtube_parses_video_search_and_pagination():
     assert page.mentions[0].title == "An <Acme> review"
     assert page.mentions[0].author == "Alice & Bob"
     assert page.mentions[0].url == "https://www.youtube.com/watch?v=abc123"
+
+
+@respx.mock
+def test_threads_parses_keyword_search_and_pagination():
+    route = respx.get("https://graph.threads.net/keyword_search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "th-123",
+                        "username": "alice",
+                        "text": "Looking for an ecommerce platform",
+                        "permalink": "https://www.threads.net/@alice/post/th-123",
+                        "timestamp": "2026-09-23T09:30:00+0000",
+                    }
+                ],
+                "paging": {"cursors": {"after": "older-threads"}},
+            },
+        )
+    )
+    since = datetime(2026, 9, 23, 8, 0, tzinfo=timezone.utc)
+    page = ThreadsSource(access_token="secret-token").fetch_page(
+        "ecommerce", limit=25, cursor="current", since=since
+    )
+    request = route.calls[0].request
+    params = request.url.params
+    assert request.headers["authorization"] == "Bearer secret-token"
+    assert "access_token" not in params
+    assert params["q"] == "ecommerce"
+    assert params["search_type"] == "RECENT"
+    assert params["search_mode"] == "KEYWORD"
+    assert params["after"] == "current"
+    assert params["since"] == "2026-09-23T08:00:00Z"
+    assert page.next_cursor == "older-threads"
+    assert len(page.mentions) == 1
+    assert page.mentions[0].source == "threads"
+    assert page.mentions[0].author == "alice"
+    assert page.mentions[0].url == "https://www.threads.net/@alice/post/th-123"
+
+
+def test_threads_requires_access_token():
+    with pytest.raises(RuntimeError, match="HARKEN_THREADS_ACCESS_TOKEN"):
+        ThreadsSource().fetch("ecommerce")
 
 
 @respx.mock
