@@ -159,6 +159,9 @@ class Config:
     youtube_api_key: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_YOUTUBE_API_KEY") or None
     )
+    threads_access_token: str | None = field(
+        default_factory=lambda: os.getenv("HARKEN_THREADS_ACCESS_TOKEN") or None
+    )
     rss_feeds: list[str] = field(default_factory=lambda: _env_list("HARKEN_RSS_FEEDS"))
     webhook_url: str | None = field(default_factory=lambda: os.getenv("HARKEN_WEBHOOK_URL") or None)
     email_to: list[str] = field(default_factory=lambda: _env_list("HARKEN_EMAIL_TO"))
@@ -251,4 +254,6 @@ class Config:
             return {"bearer_token": self.x_bearer_token}
         if name == "youtube":
             return {"api_key": self.youtube_api_key}
+        if name == "threads":
+            return {"access_token": self.threads_access_token}
         return {}
