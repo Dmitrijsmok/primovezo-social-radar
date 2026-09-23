@@ -130,7 +130,7 @@ def track(
             console.print(f"  [yellow]![/yellow] optional LLM labels: {result.analysis_error}")
         if result.sentiment_error:
             console.print(f"  [yellow]![/yellow] sentiment: {result.sentiment_error}")
-        _print_alert_result(result)
+        _print_alert_result(result, lead_mode=cfg.lead_enabled)
         console.print(
             f"[green]✓[/green] {result.fetched} fetched · [bold]{result.new}[/bold] new · "
             f"{sum(result.by_source.values())} matched"
@@ -236,7 +236,7 @@ def watch(
                     )
                 if result.sentiment_error:
                     console.print(f"  [yellow]![/yellow] sentiment: {result.sentiment_error}")
-                _print_alert_result(result, lead_mode=True)
+                _print_alert_result(result, lead_mode=cfg.lead_enabled)
                 console.print(
                     f"[green]✓[/green] scan {completed}: {result.fetched} fetched · "
                     f"[bold]{result.new}[/bold] new"
