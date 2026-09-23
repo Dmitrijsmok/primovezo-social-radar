@@ -346,7 +346,7 @@ def leads_primovezo(
         webhook_url=None,
     )
 
-    keywords = PRIMOVEZO_LEAD_KEYWORDS
+    keywords = (*PRIMOVEZO_LEAD_KEYWORDS, *PRIMOVEZO_DISCOVERY_KEYWORDS)
     console.print(
         Panel.fit(
             f"[bold]Primovezo lead radar[/bold]\n"
