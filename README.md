@@ -186,8 +186,9 @@ A typical daily production flow is simply one scheduled invocation:
 uv run harken leads primovezo
 ```
 
-Run that command once per day with cron or a systemd timer. When new qualified leads
-exist, one digest goes to `HARKEN_EMAIL_TO`. No prospect is contacted automatically.
+Run that command once per day with cron or a systemd timer. In the Primovezo production
+setup, new qualified leads are delivered through Resend to `HARKEN_RESEND_TO`, from
+`noreply@primovezo.com`. No prospect is contacted automatically.
 
 For the production user-level systemd timer, SMTP test, logs, and enable/disable
 commands, see [docs/primovezo-production.md](docs/primovezo-production.md).
