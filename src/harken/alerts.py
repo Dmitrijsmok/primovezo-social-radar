@@ -306,7 +306,9 @@ def _lead_alert_text(query: str, mentions: list[Mention]) -> str:
                 ]
             )
             if mention.suggested_reply:
-                lines.append(f"  Suggested reply: {mention.suggested_reply}")
+                lines.append(
+                    f"  Draft reply (not sent automatically): {mention.suggested_reply}"
+                )
         if mention.url:
             lines.append(f"  Open: {mention.url}")
     if count > 10:
