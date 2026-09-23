@@ -127,3 +127,56 @@ def test_pipeline_persists_lead_analysis_for_new_mentions(tmp_path, monkeypatch)
 def test_invalid_lead_threshold_is_rejected():
     with pytest.raises(ValueError, match="at most 100"):
         Config(lead_min_score=101)
+
+
+def test_lead_alerts_are_deduped_across_keywords(tmp_path, monkeypatch):
+    from harken.sources import REGISTRY
+
+    class SharedPostSource:
+        def __init__(self, **options):
+            pass
+
+        def fetch(self, query, limit=50):
+            return [
+                Mention(
+                    source="shared-lead",
+                    query=query,
+                    text="We need a new ecommerce platform",
+                    url="https://example.test/shared-lead",
+                    created_at=datetime.now(timezone.utc),
+                )
+            ]
+
+    deliveries = []
+    monkeypatch.setitem(REGISTRY, "shared-lead", SharedPostSource)
+    monkeypatch.setattr("harken.pipeline.get_provider", lambda name: _Provider())
+    monkeypatch.setattr(
+        "harken.pipeline.send_lead_email",
+        lambda settings, query, mentions: deliveries.append(
+            (query, [mention.id for mention in mentions])
+        ),
+    )
+
+    pipe = Pipeline(
+        Config(
+            db_path=str(tmp_path / "lead-dedupe.db"),
+            sources=["shared-lead"],
+            lead_enabled=True,
+            lead_min_score=70,
+            lead_llm_provider="test",
+            email_to=["ops@example.test"],
+            email_from="harken@example.test",
+            smtp_host="smtp.example.test",
+            smtp_security="none",
+        )
+    )
+
+    first = pipe.track("interneta veikals")
+    second = pipe.track("e-komercija")
+
+    assert first.alerted == 1
+    assert second.new == 1
+    assert second.alerted == 0
+    assert second.alert_pending == 0
+    assert len(deliveries) == 1
+    pipe.close()
