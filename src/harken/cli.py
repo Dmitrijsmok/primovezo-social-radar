@@ -7,6 +7,8 @@ import io
 import json
 import sqlite3
 import time
+from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,7 +20,9 @@ from rich.table import Table
 from harken import __version__
 from harken.alerts import (
     EmailSettings,
+    email_target_key,
     send_lead_alert,
+    send_lead_digest_email,
     send_lead_email,
     send_negative_alert,
     send_negative_email,
@@ -121,7 +125,7 @@ def track(
     cfg = _tracking_config(sources, limit, db)
 
     console.print(f"Listening for [bold]“{query}”[/bold] across: {', '.join(cfg.sources)} …")
-    pipe = Pipeline(cfg)
+    pipe = Pipeline(scan_cfg)
     try:
         result = pipe.track(query, pages=pages, project_id=project)
 
@@ -291,6 +295,11 @@ def leads_primovezo(
     # keyword notifications. Mentions are still stored; only delivery is strict.
     cfg.lead_fallback_alerts = False
 
+    # Primovezo email is an internal once-per-run digest, never outbound contact
+    # to the social author. Disable per-keyword transports during the scan.
+    digest_email = _email_settings(cfg)
+    scan_cfg = replace(cfg, email_to=[], webhook_url=None)
+
     keywords = PRIMOVEZO_LEAD_KEYWORDS
     console.print(
         Panel.fit(
@@ -300,17 +309,20 @@ def leads_primovezo(
             border_style="cyan",
         )
     )
-    if not cfg.email_to and not cfg.webhook_url:
+    if digest_email is None:
         console.print(
-            "[yellow]![/yellow] No email/webhook transport configured; "
-            "qualified leads will be stored but not pushed."
+            "[yellow]![/yellow] No internal email configured; "
+            "qualified leads will be stored but no daily digest will be sent."
         )
 
-    rows: list[tuple[str, str, int, int, int, str, int, int]] = []
+    rows: list[tuple[str, str, int, int, int, str, int]] = []
     total_fetched = 0
     total_new = 0
     total_leads = 0
-    total_alerted = 0
+    candidate_mentions: list[Mention] = []
+    digest_delivered = 0
+    digest_pending = 0
+    digest_error: str | None = None
     failed_keywords = 0
     lead_fallbacks = 0
     pipe = Pipeline(cfg)
@@ -323,15 +335,14 @@ def leads_primovezo(
                 raise
             except Exception as exc:
                 failed_keywords += 1
-                rows.append((group, query, 0, 0, 0, f"error: {type(exc).__name__}", 0, 0))
+                rows.append((group, query, 0, 0, 0, f"error: {type(exc).__name__}", 0))
                 console.print(f"  [red]✗[/red] {type(exc).__name__}: {exc}")
             else:
                 for source, err in result.errors.items():
                     console.print(f"  [yellow]![/yellow] {source}: {err}")
                 _print_retries(result)
-                _print_alert_result(result, lead_mode=True)
 
-                source_count = len({name for name in cfg.sources if name.strip()})
+                source_count = len({name for name in scan_cfg.sources if name.strip()})
                 if source_count and len(result.errors) == source_count:
                     failed_keywords += 1
                 if result.lead_analysis_error:
@@ -355,16 +366,40 @@ def leads_primovezo(
                         retries,
                         ai_state,
                         result.lead_candidates,
-                        result.alerted,
                     )
                 )
                 total_fetched += result.fetched
                 total_new += result.new
                 total_leads += result.lead_candidates
-                total_alerted += result.alerted
+                candidate_mentions.extend(result.lead_candidate_mentions)
 
             if index < len(keywords) and delay:
                 time.sleep(delay)
+
+        if digest_email is not None:
+            target_key = "lead-" + email_target_key(digest_email)
+            pipe.store.enqueue_alerts(
+                candidate_mentions,
+                target_key,
+                dedupe_across_queries=True,
+            )
+            pending = pipe.store.pending_alerts_for_target(target_key, limit=100)
+            digest_pending = len(pending)
+            if pending:
+                grouped: dict[str, list[str]] = defaultdict(list)
+                for mention in pending:
+                    grouped[mention.query].append(mention.id)
+                try:
+                    send_lead_digest_email(digest_email, pending)
+                except Exception as exc:
+                    digest_error = f"{type(exc).__name__}: {exc}"
+                    for query, ids in grouped.items():
+                        pipe.store.mark_alerts_failed(query, ids, target_key, digest_error)
+                else:
+                    for query, ids in grouped.items():
+                        pipe.store.mark_alerts_delivered(query, ids, target_key)
+                    digest_delivered = len(pending)
+                    digest_pending = 0
     except KeyboardInterrupt:
         console.print("\n[dim]Primovezo lead scan stopped.[/dim]")
         raise typer.Exit(130) from None
@@ -379,8 +414,7 @@ def leads_primovezo(
     table.add_column("retries", justify="right")
     table.add_column("AI")
     table.add_column("leads", justify="right")
-    table.add_column("alerts", justify="right")
-    for group, query, fetched, new, retries, ai_state, leads, alerted in rows:
+    for group, query, fetched, new, retries, ai_state, leads in rows:
         table.add_row(
             group,
             query,
@@ -389,14 +423,26 @@ def leads_primovezo(
             str(retries),
             ai_state,
             str(leads),
-            str(alerted),
         )
     console.print(table)
+    unique_leads = len({(mention.source, mention.id) for mention in candidate_mentions})
     console.print(
         f"[green]✓[/green] {total_fetched} fetched · [bold]{total_new}[/bold] new · "
-        f"{total_leads} qualified lead(s) · {total_alerted} delivered alert(s) · "
+        f"{total_leads} qualified match(es) · {unique_leads} unique new lead(s) · "
         f"{lead_fallbacks} classifier fallback(s)"
     )
+    if digest_email is not None:
+        if digest_error:
+            console.print(
+                f"[yellow]![/yellow] internal lead digest failed: {digest_error} "
+                f"({digest_pending} queued for retry)"
+            )
+        elif digest_delivered:
+            console.print(
+                f"[green]✉[/green] emailed {digest_delivered} lead(s) in one internal digest"
+            )
+        else:
+            console.print("[dim]No new lead digest to send.[/dim]")
     console.print(f"Database: [cyan]{cfg.db_path}[/cyan]")
 
     if failed_keywords == len(keywords):
@@ -405,9 +451,7 @@ def leads_primovezo(
 
 @lead_app.command("report")
 def leads_report(
-    min_score: int = typer.Option(
-        70, min=0, max=100, help="Minimum lead score to include."
-    ),
+    min_score: int = typer.Option(70, min=0, max=100, help="Minimum lead score to include."),
     limit: int = typer.Option(50, min=1, max=500, help="Maximum unique leads to show."),
     db: str = typer.Option(None, help="Database path (default: harken.db)."),
 ):
@@ -420,8 +464,7 @@ def leads_report(
         return
 
     console.print(
-        f"[bold]Unique qualified leads: {len(leads)}[/bold] "
-        f"[dim](score >= {min_score})[/dim]"
+        f"[bold]Unique qualified leads: {len(leads)}[/bold] [dim](score >= {min_score})[/dim]"
     )
     for index, lead in enumerate(leads, start=1):
         author = lead["author"] or "unknown"
