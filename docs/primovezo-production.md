@@ -4,28 +4,34 @@ The Primovezo runner is intended to run once per day and send at most one
 **internal** ecommerce-lead digest to `HARKEN_EMAIL_TO`. It never contacts a
 prospect automatically.
 
-## 1. Configure the internal email
+## 1. Configure the internal Resend digest
 
 Keep the real values only in the repository's local `.env`:
 
 ```dotenv
-HARKEN_EMAIL_TO=you@example.com
-HARKEN_EMAIL_FROM=info@primovezo.lv
-HARKEN_SMTP_HOST=<smtp-host>
-HARKEN_SMTP_PORT=587
-HARKEN_SMTP_SECURITY=starttls
-HARKEN_SMTP_USERNAME=<smtp-user>
-HARKEN_SMTP_PASSWORD=<smtp-password>
+HARKEN_RESEND_API_KEY=re_...
+HARKEN_RESEND_FROM=noreply@primovezo.com
+HARKEN_RESEND_TO=<your-internal-email>
 ```
 
-The recipient should be an internal Primovezo mailbox. Do not put prospect
-addresses in `HARKEN_EMAIL_TO`.
+`HARKEN_RESEND_TO` is an internal Primovezo recipient. Do not put prospect
+addresses there. The runner never emails a social-network author.
+
+The sending domain must be verified in Resend before using
+`noreply@primovezo.com`.
 
 Verify the exact digest format without scanning social networks:
 
 ```bash
-uv run harken test-alert --transport email --kind lead
+uv run harken test-alert --transport resend --kind lead
 ```
+
+The Resend request uses an idempotency key derived from the digest contents and
+delivery target. Identical retries within Resend's idempotency window therefore
+do not create a second copy of the same digest.
+
+SMTP remains supported by general Harken alerting, but it is not required for
+the Primovezo production setup.
 
 ## 2. Verify a manual scan
 
