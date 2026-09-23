@@ -486,7 +486,7 @@ class Pipeline:
                 logger,
                 "sentiment_fallback",
                 level=logging.WARNING,
-                provider=self.config.lead_llm_provider,
+                provider=self.config.llm_provider,
                 reason_type=type(exc).__name__,
             )
             return safe_error
@@ -509,7 +509,7 @@ class Pipeline:
                 logger,
                 "lead_classification_fallback",
                 level=logging.WARNING,
-                provider=self.config.llm_provider,
+                provider=self.config.lead_llm_provider,
                 reason_type=type(exc).__name__,
             )
             return safe_error
