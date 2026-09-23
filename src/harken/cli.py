@@ -37,7 +37,7 @@ from harken.analyze.sentiment import LexiconSentiment
 from harken.auth import ROLES, hash_password, validate_password, validate_role, validate_username
 from harken.config import Config
 from harken.evaluate import evaluate_sentiment, load_sentiment_dataset
-from harken.lead_profiles import PRIMOVEZO_LEAD_KEYWORDS
+from harken.lead_profiles import PRIMOVEZO_DISCOVERY_KEYWORDS, PRIMOVEZO_LEAD_KEYWORDS
 from harken.llm import get_provider
 from harken.models import Mention, Sentiment
 from harken.observability import configure_logging
@@ -499,7 +499,7 @@ def leads_primovezo(
 @lead_app.command("recent")
 def leads_recent(
     days: int = typer.Option(5, min=1, max=30, help="How many recent days to scan."),
-    limit: int = typer.Option(100, min=1, max=100, help="Results per Bluesky page."),
+    limit: int = typer.Option(50, min=1, max=100, help="Results per Bluesky page."),
     pages: int = typer.Option(
         1,
         min=1,
@@ -553,7 +553,7 @@ def leads_recent(
         Panel.fit(
             f"[bold]Primovezo recent scan[/bold]\n"
             f"last {days} day(s) · Latvian posts · Bluesky · "
-            f"{len(PRIMOVEZO_LEAD_KEYWORDS)} intent keywords",
+            f"{len(PRIMOVEZO_DISCOVERY_KEYWORDS)} discovery keywords",
             border_style="cyan",
         )
     )
@@ -564,9 +564,9 @@ def leads_recent(
     failed_keywords = 0
     pipe = Pipeline(scan_cfg)
     try:
-        for index, (group, query) in enumerate(PRIMOVEZO_LEAD_KEYWORDS, start=1):
+        for index, (group, query) in enumerate(PRIMOVEZO_DISCOVERY_KEYWORDS, start=1):
             console.print(
-                f"[dim]{index}/{len(PRIMOVEZO_LEAD_KEYWORDS)}[/dim] "
+                f"[dim]{index}/{len(PRIMOVEZO_DISCOVERY_KEYWORDS)}[/dim] "
                 f"[bold]{group}[/bold] · “{query}”"
             )
             result = pipe.track(
@@ -592,7 +592,7 @@ def leads_recent(
             total_fetched += result.fetched
             total_new += result.new
             total_leads += result.lead_candidates
-            if index < len(PRIMOVEZO_LEAD_KEYWORDS) and delay:
+            if index < len(PRIMOVEZO_DISCOVERY_KEYWORDS) and delay:
                 time.sleep(delay)
     except KeyboardInterrupt:
         console.print("\n[dim]Recent scan stopped.[/dim]")
@@ -615,7 +615,12 @@ def leads_report(
     db: str = typer.Option(None, help="Database path (default: harken.db)."),
 ):
     """Show de-duplicated qualified ecommerce leads across all tracked keywords."""
-    active_queries = [query for _, query in PRIMOVEZO_LEAD_KEYWORDS]
+    active_queries = list(
+        dict.fromkeys(
+            query
+            for _, query in (*PRIMOVEZO_LEAD_KEYWORDS, *PRIMOVEZO_DISCOVERY_KEYWORDS)
+        )
+    )
     with Store(db or Config().db_path) as store:
         leads = store.unique_leads(
             min_score=min_score,
@@ -694,7 +699,7 @@ def leads_reclassify(
     total = 0
     relevant = 0
     with Store(db_path) as store:
-        for _, query in PRIMOVEZO_LEAD_KEYWORDS:
+        for _, query in (*PRIMOVEZO_LEAD_KEYWORDS, *PRIMOVEZO_DISCOVERY_KEYWORDS):
             mentions = store.mentions(query=query, limit=None)
             if not mentions:
                 continue
