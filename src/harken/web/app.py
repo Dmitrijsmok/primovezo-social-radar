@@ -51,6 +51,7 @@ SOURCE_META = {
     "bluesky": {"label": "Bluesky", "glyph": "◈", "color": "#3aa8ff"},
     "rss": {"label": "RSS", "glyph": "∿", "color": "#e0a23a"},
     "stackoverflow": {"label": "Stack Overflow", "glyph": "<>", "color": "#f48024"},
+    "threads": {"label": "Threads", "glyph": "@", "color": "#ffffff"},
     "x": {"label": "X / Twitter", "glyph": "X", "color": "#d8dce5"},
     "youtube": {"label": "YouTube", "glyph": "▶", "color": "#ff3d3d"},
 }
