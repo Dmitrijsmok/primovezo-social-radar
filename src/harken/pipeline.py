@@ -94,6 +94,9 @@ class Pipeline:
         backfill: bool = False,
         pages: int = 3,
         project_id: int | None = None,
+        since_override: datetime | None = None,
+        classify_fetched: bool = False,
+        update_source_state: bool = True,
     ) -> TrackResult:
         query = query.strip()
         if not query:
@@ -105,8 +108,10 @@ class Pipeline:
             raise ValueError("at least one source must be configured")
         if not 1 <= pages <= 20:
             raise ValueError("pages must be between 1 and 20")
+        if backfill and since_override is not None:
+            raise ValueError("backfill and since_override cannot be used together")
         track_started = time.perf_counter()
-        mode = "backfill" if backfill else "incremental"
+        mode = "window" if since_override is not None else ("backfill" if backfill else "incremental")
         result = TrackResult(query=query, project_id=project_id, mode=mode)
         collected: list[Mention] = []
         successful: dict[str, tuple[list[Mention], str | None, datetime | None]] = {}
@@ -136,18 +141,26 @@ class Pipeline:
                 continue
             try:
                 source = source_cls(**self.config.source_options(name))
-                cursor = (
-                    state.get("backfill_cursor") if backfill else state.get("incremental_cursor")
-                )
-                since = None
-                if not backfill:
-                    since = _parse_datetime(
-                        state.get("incremental_since") or state.get("newest_at")
+                if since_override is not None:
+                    cursor = None
+                    since = since_override
+                    incremental_since = None
+                    page_limit = pages
+                else:
+                    cursor = (
+                        state.get("backfill_cursor")
+                        if backfill
+                        else state.get("incremental_cursor")
                     )
-                incremental_since = since
+                    since = None
+                    if not backfill:
+                        since = _parse_datetime(
+                            state.get("incremental_since") or state.get("newest_at")
+                        )
+                    incremental_since = since
+                    page_limit = pages if backfill or state.get("newest_at") else 1
                 source_mentions: list[Mention] = []
                 next_cursor: str | None = cursor
-                page_limit = pages if backfill or state.get("newest_at") else 1
                 for page_number in range(page_limit):
                     page = self._fetch_with_retries(
                         source,
@@ -190,20 +203,22 @@ class Pipeline:
                 if not backfill and mention.id not in existing_ids
             }.values()
         )
+        lead_mentions = collected if classify_fetched else new_mentions
 
         if self.config.lead_enabled:
-            # Classify only newly discovered mentions. Re-scans stay cheap, and
-            # backfill does not unexpectedly consume an LLM quota.
-            result.lead_analysis_error = self._analyze_leads(new_mentions)
+            # Normal incremental scans classify only newly discovered mentions.
+            # Explicit historical windows may opt into classifying every fetched
+            # item so a one-off recent scan can refresh existing rows too.
+            result.lead_analysis_error = self._analyze_leads(lead_mentions)
             if result.lead_analysis_error:
                 # General Harken keeps its fail-open default so monitoring does
                 # not silently go blind. Focused production runners may opt out
                 # to avoid sending unclassified keyword matches as sales leads.
-                alert_mentions = new_mentions if self.config.lead_fallback_alerts else []
+                alert_mentions = lead_mentions if self.config.lead_fallback_alerts else []
             else:
                 alert_mentions = [
                     mention
-                    for mention in new_mentions
+                    for mention in lead_mentions
                     if mention.lead_relevant
                     and (mention.lead_score or 0) >= self.config.lead_min_score
                 ]
@@ -219,16 +234,17 @@ class Pipeline:
         # existing labels here; themes are (re)clustered and written below.
         result.new = self.store.upsert(collected, update_theme=False)
         if self.config.lead_enabled:
-            self.store.save_lead_analysis(new_mentions)
-        for name, (mentions, next_cursor, incremental_since) in successful.items():
-            self.store.record_source_success(
-                query,
-                name,
-                mentions,
-                mode=mode,
-                next_cursor=next_cursor,
-                incremental_since=incremental_since,
-            )
+            self.store.save_lead_analysis(lead_mentions)
+        if update_source_state:
+            for name, (mentions, next_cursor, incremental_since) in successful.items():
+                self.store.record_source_success(
+                    query,
+                    name,
+                    mentions,
+                    mode=mode,
+                    next_cursor=next_cursor,
+                    incremental_since=incremental_since,
+                )
 
         # cluster themes over the full stored set for this query, then persist labels
         stored = self.store.mentions(query=query, limit=None)
