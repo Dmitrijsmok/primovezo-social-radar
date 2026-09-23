@@ -63,6 +63,13 @@ console = Console()
 PRIMOVEZO_ALLOWED_SOURCES = {"bluesky", "threads", "x"}
 
 
+def _primovezo_auto_sources(cfg: Config) -> list[str]:
+    sources = ["bluesky"]
+    if cfg.threads_access_token:
+        sources.append("threads")
+    return sources
+
+
 def _version(value: bool):
     if value:
         console.print(f"harken {__version__}")
@@ -265,8 +272,11 @@ def watch(
 @lead_app.command("primovezo")
 def leads_primovezo(
     sources: str = typer.Option(
-        "bluesky",
-        help="Comma-separated sources for the profile (default: bluesky).",
+        None,
+        help=(
+            "Comma-separated sources. Default: Bluesky plus Threads when "
+            "HARKEN_THREADS_ACCESS_TOKEN is configured."
+        ),
     ),
     limit: int = typer.Option(50, min=1, max=100, help="Max items per source and keyword."),
     pages: int = typer.Option(
@@ -281,7 +291,9 @@ def leads_primovezo(
     db: str = typer.Option(None, help="Database path (default: harken.db)."),
 ):
     """Scan the built-in Primovezo Latvian commercial-intent keyword profile."""
-    cfg = _tracking_config(sources, limit, db)
+    base_cfg = Config()
+    selected_sources = sources or ",".join(_primovezo_auto_sources(base_cfg))
+    cfg = _tracking_config(selected_sources, limit, db)
     disallowed_sources = sorted(set(cfg.sources) - PRIMOVEZO_ALLOWED_SOURCES)
     if disallowed_sources:
         allowed = ", ".join(sorted(PRIMOVEZO_ALLOWED_SOURCES))
@@ -343,6 +355,10 @@ def leads_primovezo(
             border_style="cyan",
         )
     )
+    if "threads" not in cfg.sources and not cfg.threads_access_token:
+        console.print(
+            "[dim]Threads disabled: HARKEN_THREADS_ACCESS_TOKEN is not configured.[/dim]"
+        )
     if digest_resend is None and digest_email is None:
         console.print(
             "[yellow]![/yellow] No internal Resend/SMTP delivery configured; "
@@ -514,8 +530,10 @@ def leads_recent(
     ),
     db: str = typer.Option(None, help="Database path (default: harken.db)."),
 ):
-    """Scan a recent Latvian Bluesky window without changing the daily cursor or sending email."""
-    cfg = _tracking_config("bluesky", limit, db)
+    """Scan a recent Latvian social window without changing the daily cursor or sending email."""
+    base_cfg = Config()
+    selected_sources = _primovezo_auto_sources(base_cfg)
+    cfg = _tracking_config(",".join(selected_sources), limit, db)
     cfg.lead_enabled = True
     cfg.lead_fallback_alerts = False
     cfg.bluesky_lang = "lv"
@@ -552,11 +570,15 @@ def leads_recent(
     console.print(
         Panel.fit(
             f"[bold]Primovezo recent scan[/bold]\n"
-            f"last {days} day(s) · Latvian posts · Bluesky · "
+            f"last {days} day(s) · Latvian classifier · {', '.join(cfg.sources)} · "
             f"{len(PRIMOVEZO_DISCOVERY_KEYWORDS)} discovery keywords",
             border_style="cyan",
         )
     )
+    if "threads" not in cfg.sources:
+        console.print(
+            "[dim]Threads disabled: HARKEN_THREADS_ACCESS_TOKEN is not configured.[/dim]"
+        )
 
     total_fetched = 0
     total_new = 0
