@@ -116,19 +116,49 @@ When email or webhook alerts are configured, only lead candidates at or above
 invalid response, new raw keyword matches are delivered instead so monitoring
 does not silently go blind.
 
-A practical Latvian starter set:
+For Primovezo, the fork includes a built-in Latvian commercial-intent profile.
+Run the whole profile with one command:
 
 ```bash
-harken track "meklēju interneta veikalu"
-harken track "vajag interneta veikalu"
-harken track "interneta veikala izstrāde"
-harken track "meklēju mājaslapas izstrādātāju"
-harken track "vajag mājaslapu"
-harken track "Shopify alternatīva"
-harken track "WooCommerce alternatīva"
-harken track "apsaimniekošanas programma"
-harken track "iedzīvotāju portāls"
-harken track "Bill.me alternatīva"
+harken leads primovezo
+```
+
+The runner scans 18 ecommerce, website, community-management, and automation
+queries. It enables lead mode automatically, uses Bluesky by default, and waits
+5 seconds between keywords to reduce burst throttling. Source-level retry/backoff
+still applies if Bluesky temporarily returns 403. Override the source set when
+additional configured sources are available:
+
+```bash
+harken leads primovezo --sources bluesky,threads
+harken leads primovezo --limit 25 --delay 8
+```
+
+The command requires `HARKEN_LEAD_LLM_PROVIDER` to be configured. If neither
+email nor webhook delivery is configured, qualified leads are still classified
+and stored locally, and the runner prints a warning rather than discarding them.
+
+The current built-in profile covers queries such as:
+
+```text
+meklēju interneta veikalu
+vajag interneta veikalu
+interneta veikala izstrāde
+e-veikala izstrāde
+e-komercijas platforma
+Shopify alternatīva
+WooCommerce alternatīva
+meklēju mājaslapas izstrādātāju
+vajag mājaslapu
+mājaslapas izstrāde
+mājaslapas uzturēšana
+mājaslapas pārtaisīšana
+apsaimniekošanas programma
+namu apsaimniekošanas programma
+iedzīvotāju portāls
+dzīvokļu īpašnieku biedrība
+Bill.me alternatīva
+rēķinu automatizācija
 ```
 
 Threads uses Meta's official keyword-search API and requires a user access token
