@@ -93,6 +93,38 @@ def test_classifier_prompt_limits_primovezo_to_ecommerce():
     assert "Only Latvian-language posts" in prompt
     assert "all other non-Latvian posts do NOT qualify" in prompt
     assert "Do not translate a foreign" in prompt
+    assert "useful public conversation" in prompt
+    assert "category ecommerce for direct commercial leads" in prompt
+    assert "conversation for useful discussions worth joining" in prompt
+
+
+def test_classifier_accepts_latvian_conversation_opportunity():
+    class ConversationProvider:
+        available = True
+
+        def complete(self, prompt, system=None, max_tokens=1024):
+            records = json.loads(prompt.split("\n\n")[-1])
+            return json.dumps(
+                {
+                    record["id"]: {
+                        "market_lv": True,
+                        "relevant": True,
+                        "score": 82,
+                        "category": "conversation",
+                        "reason_lv": "Diskusija par WooCommerce alternatīvām.",
+                        "reply_lv": "Vēl viena alternatīva, ko var apskatīt, ir Primovezo.",
+                    }
+                    for record in records
+                }
+            )
+
+    mention = _mention("Kādas WooCommerce alternatīvas jūs izmantojat?")
+    classify_leads([mention], ConversationProvider())
+
+    assert mention.lead_relevant is True
+    assert mention.lead_score == 82
+    assert mention.lead_category == "conversation"
+    assert "Primovezo" in mention.suggested_reply
 
 
 def test_classifier_forces_non_latvia_post_irrelevant():
