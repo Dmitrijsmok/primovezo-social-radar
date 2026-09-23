@@ -277,6 +277,8 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
                     self.config.lead_enabled,
                     self.config.lead_fallback_alerts,
                     tuple(self.config.sources),
+                    self.config.source_retries,
+                    self.config.retry_backoff,
                 )
             )
             return SimpleNamespace(
@@ -323,10 +325,12 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert [query for query, *_ in calls] == [query for _, query in cli.PRIMOVEZO_LEAD_KEYWORDS]
-    assert all(pages == 2 for _, pages, _, _, _ in calls)
-    assert all(lead_enabled for _, _, lead_enabled, _, _ in calls)
-    assert all(not fallback for _, _, _, fallback, _ in calls)
-    assert all(sources == ("bluesky",) for _, _, _, _, sources in calls)
+    assert all(pages == 2 for _, pages, _, _, _, _, _ in calls)
+    assert all(lead_enabled for _, _, lead_enabled, _, _, _, _ in calls)
+    assert all(not fallback for _, _, _, fallback, _, _, _ in calls)
+    assert all(sources == ("bluesky",) for _, _, _, _, sources, _, _ in calls)
+    assert all(retries == 3 for _, _, _, _, _, retries, _ in calls)
+    assert all(backoff == 10.0 for _, _, _, _, _, _, backoff in calls)
     assert delays == [0.25] * (len(cli.PRIMOVEZO_LEAD_KEYWORDS) - 1)
     assert closed == [True]
     assert "Primovezo lead scan" in result.output
