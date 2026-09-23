@@ -314,7 +314,11 @@ class Pipeline:
             )
 
         for target in targets:
-            self.store.enqueue_alerts(new_negative, target.key)
+            self.store.enqueue_alerts(
+                new_negative,
+                target.key,
+                dedupe_across_queries=self.config.lead_enabled,
+            )
             pending = self.store.pending_alerts(query, target.key)
             if pending:
                 ids = [mention.id for mention in pending]

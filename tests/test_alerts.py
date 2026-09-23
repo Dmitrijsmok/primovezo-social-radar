@@ -501,3 +501,43 @@ def test_backfill_does_not_open_negative_or_threshold_alerts(tmp_path, monkeypat
     assert result.threshold_alerted == 0
     assert not route.called
     pipe.close()
+
+
+def test_standard_alerts_remain_scoped_per_keyword(tmp_path, monkeypatch):
+    class SharedNegativeSource:
+        def __init__(self, **options):
+            pass
+
+        def fetch(self, query, limit=50):
+            mention = negative_mention()
+            mention.query = query
+            mention.sentiment = None
+            return [mention]
+
+    deliveries = []
+    monkeypatch.setitem(REGISTRY, "shared-negative", SharedNegativeSource)
+    monkeypatch.setattr(
+        "harken.pipeline.send_negative_email",
+        lambda settings, query, mentions: deliveries.append(
+            (query, [mention.id for mention in mentions])
+        ),
+    )
+
+    pipe = Pipeline(
+        Config(
+            db_path=str(tmp_path / "standard-per-query.db"),
+            sources=["shared-negative"],
+            email_to=["ops@example.test"],
+            email_from="harken@example.test",
+            smtp_host="smtp.example.test",
+            smtp_security="none",
+        )
+    )
+
+    first = pipe.track("acme")
+    second = pipe.track("acme pricing")
+
+    assert first.alerted == 1
+    assert second.alerted == 1
+    assert [query for query, _ in deliveries] == ["acme", "acme pricing"]
+    pipe.close()

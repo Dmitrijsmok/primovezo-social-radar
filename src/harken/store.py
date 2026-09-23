@@ -980,12 +980,34 @@ class Store:
                 found.update(row["id"] for row in cur.fetchall())
         return found
 
-    def enqueue_alerts(self, mentions: list[Mention], target_key: str) -> int:
-        """Add mentions to the durable delivery outbox. Returns newly queued rows."""
+    def enqueue_alerts(
+        self,
+        mentions: list[Mention],
+        target_key: str,
+        *,
+        dedupe_across_queries: bool = False,
+    ) -> int:
+        """Add mentions to the durable delivery outbox. Returns newly queued rows.
+
+        Lead-radar targets can opt into cross-query de-duplication so one source
+        post matching several tracked keywords is delivered only once to the
+        same destination. Standard Harken alerts keep their per-query behavior.
+        """
         now = datetime.now(timezone.utc).isoformat()
         queued = 0
         with closing(self._conn.cursor()) as cur:
             for mention in mentions:
+                if dedupe_across_queries:
+                    cur.execute(
+                        """
+                        SELECT 1 FROM alert_outbox
+                        WHERE mention_id = ? AND target_key = ?
+                        LIMIT 1
+                        """,
+                        (mention.id, target_key),
+                    )
+                    if cur.fetchone() is not None:
+                        continue
                 cur.execute(
                     """
                     INSERT OR IGNORE INTO alert_outbox
