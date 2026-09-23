@@ -134,9 +134,11 @@ harken leads primovezo --sources bluesky,threads
 harken leads primovezo --limit 25 --delay 8
 ```
 
-The command requires `HARKEN_LEAD_LLM_PROVIDER` to be configured. If neither
-email nor webhook delivery is configured, qualified leads are still classified
-and stored locally, and the runner prints a warning rather than discarding them.
+The command requires `HARKEN_LEAD_LLM_PROVIDER` and usable provider credentials.
+It also forces strict delivery: if the classifier fails, fetched mentions are still
+stored but raw keyword matches are **not** sent as sales leads. If neither email nor
+webhook delivery is configured, qualified leads are still classified and stored
+locally, and the runner prints a warning rather than discarding them.
 
 The current built-in profile covers queries such as:
 
