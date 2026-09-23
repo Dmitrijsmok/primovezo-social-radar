@@ -500,7 +500,12 @@ def leads_primovezo(
 def leads_recent(
     days: int = typer.Option(5, min=1, max=30, help="How many recent days to scan."),
     limit: int = typer.Option(100, min=1, max=100, help="Results per Bluesky page."),
-    pages: int = typer.Option(5, min=1, max=20, help="Maximum pages per keyword."),
+    pages: int = typer.Option(
+        1,
+        min=1,
+        max=20,
+        help="Maximum pages per keyword; one 100-result page is safest on public Bluesky search.",
+    ),
     delay: float = typer.Option(
         5.0,
         min=0.0,
