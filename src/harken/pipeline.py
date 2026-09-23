@@ -486,7 +486,7 @@ class Pipeline:
                 logger,
                 "sentiment_fallback",
                 level=logging.WARNING,
-                provider=self.config.llm_provider,
+                provider=self.config.lead_llm_provider,
                 reason_type=type(exc).__name__,
             )
             return safe_error
@@ -495,10 +495,11 @@ class Pipeline:
         if not mentions:
             return None
         try:
-            provider = get_provider(self.config.llm_provider)
+            provider = get_provider(self.config.lead_llm_provider)
             if not getattr(provider, "available", False):
                 raise RuntimeError(
-                    f"{self.config.llm_provider} provider is unavailable; check its credentials"
+                    f"{self.config.lead_llm_provider} provider is unavailable; "
+                    "check its credentials"
                 )
             classify_leads(mentions, provider)
             return None
