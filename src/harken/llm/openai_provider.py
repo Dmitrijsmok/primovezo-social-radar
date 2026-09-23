@@ -70,7 +70,6 @@ class OpenAIProvider(LLMProvider):
         raise RuntimeError("unreachable")
 
 
-
 def _retry_delay(response: httpx.Response, attempt: int) -> float:
     retry_after = response.headers.get("retry-after")
     if retry_after:
