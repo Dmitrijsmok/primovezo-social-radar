@@ -327,9 +327,73 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
     assert delays == [0.25] * (len(cli.PRIMOVEZO_LEAD_KEYWORDS) - 1)
     assert closed == [True]
     assert "Primovezo lead scan" in result.output
-    assert "18 fetched" not in result.output
-    assert "36 fetched" in result.output
-    assert "18 qualified lead(s)" in result.output
+    expected = len(cli.PRIMOVEZO_LEAD_KEYWORDS)
+    assert f"{expected * 2} fetched" in result.output
+    assert f"{expected} qualified lead(s)" in result.output
+    assert all(group == "ecommerce" for group, _ in cli.PRIMOVEZO_LEAD_KEYWORDS)
+
+
+def test_leads_report_shows_one_unique_post_for_overlapping_queries(tmp_path):
+    db_path = tmp_path / "leads-report.db"
+    with Store(db_path) as store:
+        from datetime import datetime, timezone
+        from harken.models import Mention
+
+        rows = []
+        for query, score in (("interneta veikals", 90), ("e-komercijas platforma", 95)):
+            mention = Mention(
+                source="bluesky",
+                query=query,
+                author="seller.bsky.social",
+                text="Meklēju e-komercijas platformu interneta veikalam",
+                url="https://bsky.app/profile/seller/post/1",
+                created_at=datetime(2026, 9, 23, tzinfo=timezone.utc),
+                lead_relevant=True,
+                lead_score=score,
+                lead_category="ecommerce",
+                lead_reason="Aktīvs e-komercijas pieprasījums",
+                suggested_reply="Varu parādīt Primovezo e-komercijas platformu.",
+            )
+            rows.append(mention)
+        store.upsert(rows)
+        store.save_lead_analysis(rows)
+
+    result = runner.invoke(
+        cli.app,
+        ["leads", "report", "--db", str(db_path), "--min-score", "70"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Unique qualified leads: 1" in result.output
+    assert "95/100" in result.output
+    assert "interneta veikals" in result.output
+    assert "e-komercijas platforma" in result.output
+
+
+def test_alert_command_can_send_synthetic_lead_email(monkeypatch):
+    monkeypatch.setenv("HARKEN_EMAIL_TO", "ops@example.test")
+    monkeypatch.setenv("HARKEN_EMAIL_FROM", "harken@example.test")
+    monkeypatch.setenv("HARKEN_SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("HARKEN_SMTP_SECURITY", "none")
+    delivered = []
+    monkeypatch.setattr(
+        cli,
+        "send_lead_email",
+        lambda settings, query, mentions: delivered.append((settings, query, mentions)),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["test-alert", "--transport", "email", "--kind", "lead"],
+    )
+
+    assert result.exit_code == 0, result.output
+    settings, query, mentions = delivered[0]
+    assert settings.recipients == ("ops@example.test",)
+    assert query == "interneta veikals"
+    assert mentions[0].lead_score == 92
+    assert mentions[0].lead_category == "ecommerce"
+    assert "e-komercijas platformu" in mentions[0].text
 
 
 def test_version_flag():
