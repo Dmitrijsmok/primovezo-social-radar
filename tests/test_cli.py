@@ -493,7 +493,7 @@ def test_alert_command_can_send_synthetic_lead_email(monkeypatch):
     assert result.exit_code == 0, result.output
     settings, mentions = delivered[0]
     assert settings.recipients == ("ops@example.test",)
-    assert mentions[0].query == "interneta veikals"
+    assert mentions[0].query == "meklēju interneta veikalu"
     assert mentions[0].lead_score == 92
     assert mentions[0].lead_category == "ecommerce"
     assert "e-komercijas platformu" in mentions[0].text
