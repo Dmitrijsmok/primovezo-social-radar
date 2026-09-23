@@ -211,6 +211,45 @@ def test_optional_llm_failure_is_reported_without_losing_ingestion(tmp_path, mon
     pipe.close()
 
 
+def test_lead_http_failure_reports_status_without_response_body(tmp_path, monkeypatch):
+    class FailingProvider:
+        available = True
+
+        def complete(self, *args, **kwargs):
+            request = httpx.Request("POST", "https://llm.example.test/chat/completions")
+            response = httpx.Response(
+                429,
+                request=request,
+                json={"error": {"message": "sensitive upstream detail"}},
+            )
+            raise httpx.HTTPStatusError(
+                "rate limited",
+                request=request,
+                response=response,
+            )
+
+    monkeypatch.setattr("harken.pipeline.get_provider", lambda name: FailingProvider())
+    pipe = Pipeline(
+        Config(
+            db_path=str(tmp_path / "lead-http-error.db"),
+            sources=["hackernews"],
+            lead_enabled=True,
+            lead_llm_provider="openai",
+        )
+    )
+    mention = Mention(
+        source="hackernews",
+        query="acme",
+        text="need a website",
+        url="https://example.test/lead",
+        created_at=datetime.now(timezone.utc),
+    )
+    error = pipe._analyze_leads([mention])
+    assert "HTTP 429" in error
+    assert "sensitive upstream detail" not in error
+    pipe.close()
+
+
 def test_retryable_source_errors_use_bounded_exponential_backoff(tmp_path, monkeypatch):
     from harken.sources import REGISTRY
 
