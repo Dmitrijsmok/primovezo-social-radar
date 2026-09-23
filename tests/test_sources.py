@@ -152,6 +152,16 @@ def test_bluesky_page_preserves_api_cursor_and_since_boundary():
 
 
 @respx.mock
+def test_bluesky_can_filter_by_language():
+    route = respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(200, json={"posts": []})
+    )
+    BlueskySource(lang="lv").fetch("Shopify alternatīva", limit=100)
+    params = route.calls[0].request.url.params
+    assert params["lang"] == "lv"
+
+
+@respx.mock
 def test_reddit_can_get_an_app_only_oauth_token():
     token = respx.post("https://www.reddit.com/api/v1/access_token").mock(
         return_value=httpx.Response(200, json={"access_token": "oauth-token"})
