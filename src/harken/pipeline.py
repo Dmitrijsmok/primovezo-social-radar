@@ -502,13 +502,18 @@ class Pipeline:
             classify_leads(mentions, provider)
             return None
         except Exception as exc:
-            safe_error = f"LLM lead classification unavailable: {type(exc).__name__}: {exc}"
+            http_status = _http_status(exc)
+            status_suffix = f" (HTTP {http_status})" if http_status is not None else ""
+            safe_error = (
+                f"LLM lead classification unavailable: {type(exc).__name__}: {exc}{status_suffix}"
+            )
             log_event(
                 logger,
                 "lead_classification_fallback",
                 level=logging.WARNING,
                 provider=self.config.lead_llm_provider,
                 reason_type=type(exc).__name__,
+                http_status=http_status,
             )
             return safe_error
 
@@ -613,6 +618,12 @@ def _parse_json(raw: str) -> dict | None:
     except (json.JSONDecodeError, ValueError):
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _http_status(exc: Exception) -> int | None:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code
+    return None
 
 
 def _retryable_source_error(exc: Exception, *, source: str | None = None) -> bool:
