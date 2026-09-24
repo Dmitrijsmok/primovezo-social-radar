@@ -269,6 +269,7 @@ def primovezo_live_email_test(
     total_fetched = 0
     qualified_keys: set[tuple[str, str]] = set()
     sample_by_key: dict[tuple[str, str], Mention] = {}
+    excluded_sample_by_key: dict[tuple[str, str], Mention] = {}
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     console.print(
@@ -330,6 +331,14 @@ def primovezo_live_email_test(
                     (mention.source, mention.id) for mention in result.lead_candidate_mentions
                 )
 
+                for mention in result.fetched_mentions:
+                    if not base_cfg.is_lead_author_excluded(mention.author):
+                        continue
+                    key = (mention.source, mention.id)
+                    existing = excluded_sample_by_key.get(key)
+                    if existing is None or mention.created_at > existing.created_at:
+                        excluded_sample_by_key[key] = mention
+
                 for mention in pipe.store.mentions(query=query, limit=None):
                     if base_cfg.is_lead_author_excluded(mention.author):
                         continue
@@ -357,6 +366,11 @@ def primovezo_live_email_test(
         ),
         reverse=True,
     )
+    excluded_samples = sorted(
+        excluded_sample_by_key.values(),
+        key=lambda mention: mention.created_at,
+        reverse=True,
+    )
     unique_issues = list(dict.fromkeys(issues))
 
     try:
@@ -367,6 +381,7 @@ def primovezo_live_email_test(
             qualified=len(qualified_keys),
             sources=selected_sources,
             issues=unique_issues,
+            excluded_mentions=excluded_samples,
         )
     except Exception as exc:
         console.print(f"[red]Live email test failed:[/red] {type(exc).__name__}: {exc}")
