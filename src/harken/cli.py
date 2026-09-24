@@ -68,7 +68,14 @@ app.add_typer(threads_app, name="threads")
 console = Console()
 
 
-PRIMOVEZO_ALLOWED_SOURCES = {"bluesky", "mastodon", "threads", "x", "youtube"}
+PRIMOVEZO_ALLOWED_SOURCES = {
+    "bluesky",
+    "instagram",
+    "mastodon",
+    "threads",
+    "x",
+    "youtube",
+}
 
 
 def _prepare_primovezo_threads(cfg: Config) -> str | None:
@@ -116,6 +123,8 @@ def _primovezo_auto_sources(cfg: Config) -> list[str]:
         sources.append("youtube")
     if cfg.mastodon_access_token:
         sources.append("mastodon")
+    if cfg.instagram_access_token and cfg.instagram_user_id:
+        sources.append("instagram")
     return sources
 
 
@@ -367,7 +376,7 @@ def leads_primovezo(
         None,
         help=(
             "Comma-separated sources. Default: Bluesky plus any configured "
-            "Threads, X, YouTube, and Mastodon sources."
+            "Threads, X, YouTube, Mastodon, and Instagram sources."
         ),
     ),
     limit: int = typer.Option(50, min=1, max=100, help="Max items per source and keyword."),
