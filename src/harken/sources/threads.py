@@ -69,12 +69,39 @@ class ThreadsSource(Source):
             data = response.json()
 
             mentions: list[Mention] = []
+            own_replies: dict[str, dict] | None = None
             for post in data.get("data", []):
-                if relation_fallback:
-                    post_id = str(post.get("id") or "").strip()
-                    detail = _fetch_reply_detail(client, post_id) if post_id else None
+                post_id = str(post.get("id") or "").strip()
+
+                # Keyword search may return HTTP 200 while silently omitting
+                # reply-only relation fields. Ask the media-object endpoint
+                # whenever relation metadata is absent, not only after a
+                # keyword-search field rejection.
+                needs_relation_detail = (
+                    relation_fallback
+                    or "is_reply" not in post
+                    or (post.get("is_reply") is True and not _relation_id(post.get("root_post")))
+                )
+                if needs_relation_detail and post_id:
+                    detail = _fetch_reply_detail(client, post_id)
                     if detail:
                         post = {**post, **detail}
+
+                # Meta exposes a dedicated /me/replies surface for the
+                # authenticated user's own replies. Use it as a second official
+                # fallback when a keyword result still lacks root/replied_to
+                # metadata after direct media lookup.
+                still_missing_relation = (
+                    "is_reply" not in post
+                    or (post.get("is_reply") is True and not _relation_id(post.get("root_post")))
+                )
+                if still_missing_relation and post_id:
+                    if own_replies is None:
+                        own_replies = _fetch_own_replies(client)
+                    own_detail = own_replies.get(post_id)
+                    if own_detail:
+                        post = {**post, **own_detail}
+
                 mention = _mention_with_context(client, query, post)
                 if mention is not None:
                     mentions.append(mention)
@@ -133,6 +160,29 @@ def _fetch_reply_detail(client: httpx.Client, thread_id: str) -> dict | None:
     response.raise_for_status()
     value = response.json()
     return value if isinstance(value, dict) else None
+
+
+def _fetch_own_replies(client: httpx.Client) -> dict[str, dict]:
+    response = client.get(
+        f"{_GRAPH}/me/replies",
+        params={
+            "fields": _REPLY_FIELDS,
+            "limit": 50,
+        },
+    )
+    if response.status_code in {400, 403, 404}:
+        return {}
+    response.raise_for_status()
+    value = response.json()
+    data = value.get("data", []) if isinstance(value, dict) else []
+    replies: dict[str, dict] = {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        item_id = str(item.get("id") or "").strip()
+        if item_id:
+            replies[item_id] = item
+    return replies
 
 
 def _fetch_thread(client: httpx.Client, thread_id: str) -> dict | None:
