@@ -26,6 +26,19 @@ uv run harken test-alert --transport resend --kind lead
 uv run harken test-alert --transport resend --kind operational
 ```
 
+For an end-to-end test with real current public-source data, use the isolated live email test:
+
+```bash
+uv run harken leads live-email-test
+```
+
+This command scans a small representative set of Primovezo ecommerce queries against the
+currently configured free/official Primovezo sources, runs the normal lead classifier, and
+sends one clearly marked `[Primovezo Social Radar TEST]` message through Resend. It uses a
+temporary SQLite database and does not update production `harken.db` or source cursors. The
+email is sent even when no post reaches the production lead threshold, so delivery and source
+health can be verified without weakening production filtering.
+
 The Resend request uses an idempotency key derived from the digest contents and
 delivery target. Identical retries within Resend's idempotency window therefore
 do not create a second copy of the same digest.
