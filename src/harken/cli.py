@@ -28,6 +28,7 @@ from harken.alerts import (
     send_lead_digest_resend,
     send_negative_alert,
     send_negative_email,
+    send_operational_resend,
     send_threshold_alert,
     send_threshold_email,
 )
@@ -70,17 +71,18 @@ console = Console()
 PRIMOVEZO_ALLOWED_SOURCES = {"bluesky", "threads", "x"}
 
 
-def _prepare_primovezo_threads(cfg: Config) -> None:
+def _prepare_primovezo_threads(cfg: Config) -> str | None:
     token = cfg.threads_access_token
     if not token:
-        return
+        return None
 
     try:
         maintenance = maintain_threads_token(token)
     except ThreadsAuthError as exc:
-        console.print(f"[yellow]![/yellow] Threads token unavailable: {exc}")
+        message = f"Threads token unavailable: {exc}"
+        console.print(f"[yellow]![/yellow] {message}")
         cfg.threads_access_token = None
-        return
+        return message
 
     cfg.threads_access_token = maintenance.token
     if maintenance.refreshed:
@@ -92,11 +94,15 @@ def _prepare_primovezo_threads(cfg: Config) -> None:
         console.print(
             f"[green]✓[/green] Threads token auto-refreshed; new expiry: {expires}"
         )
-    elif maintenance.refresh_error:
-        console.print(
-            "[yellow]![/yellow] Threads token refresh failed; "
-            f"current valid token kept: {maintenance.refresh_error}"
+        return None
+    if maintenance.refresh_error:
+        message = (
+            "Threads token refresh failed; current valid token kept: "
+            f"{maintenance.refresh_error}"
         )
+        console.print(f"[yellow]![/yellow] {message}")
+        return message
+    return None
 
 
 def _primovezo_auto_sources(cfg: Config) -> list[str]:
@@ -363,8 +369,11 @@ def leads_primovezo(
         if sources
         else None
     )
+    operational_issues: list[str] = []
     if requested_sources is None or "threads" in requested_sources:
-        _prepare_primovezo_threads(base_cfg)
+        threads_issue = _prepare_primovezo_threads(base_cfg)
+        if threads_issue:
+            operational_issues.append(threads_issue)
     selected_sources = sources or ",".join(_primovezo_auto_sources(base_cfg))
     cfg = _tracking_config(selected_sources, limit, db)
     cfg.threads_access_token = base_cfg.threads_access_token
@@ -459,11 +468,16 @@ def leads_primovezo(
                 raise
             except Exception as exc:
                 failed_keywords += 1
+                issue = f"scan crashed for {query!r}: {type(exc).__name__}: {exc}"
+                operational_issues.append(issue)
                 rows.append((group, query, 0, 0, 0, f"error: {type(exc).__name__}", 0))
                 console.print(f"  [red]✗[/red] {type(exc).__name__}: {exc}")
             else:
                 for source, err in result.errors.items():
                     console.print(f"  [yellow]![/yellow] {source}: {err}")
+                    operational_issues.append(
+                        f"{source} fetch failed for {query!r}: {err}"
+                    )
                 _print_retries(result)
 
                 source_count = len({name for name in scan_cfg.sources if name.strip()})
@@ -474,6 +488,9 @@ def leads_primovezo(
                     ai_state = "source error"
                 elif result.lead_analysis_error:
                     lead_fallbacks += 1
+                    operational_issues.append(
+                        f"lead classifier failed for {query!r}: {result.lead_analysis_error}"
+                    )
                     console.print(
                         f"  [yellow]![/yellow] lead classifier: {result.lead_analysis_error}"
                     )
@@ -542,6 +559,29 @@ def leads_primovezo(
         raise typer.Exit(130) from None
     finally:
         pipe.close()
+
+    if operational_issues and failed_keywords < len(keywords):
+        if digest_resend is not None:
+            try:
+                send_operational_resend(
+                    digest_resend,
+                    issues=operational_issues,
+                    run_label="daily ecommerce scan",
+                )
+            except Exception as exc:
+                console.print(
+                    "[yellow]![/yellow] operational warning delivery failed: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            else:
+                console.print(
+                    f"[yellow]✉[/yellow] sent one operational warning "
+                    f"for {len(operational_issues)} issue(s)"
+                )
+        else:
+            console.print(
+                "[yellow]![/yellow] operational issue(s) detected, but Resend is not configured"
+            )
 
     table = Table(title="Primovezo lead scan")
     table.add_column("group")
