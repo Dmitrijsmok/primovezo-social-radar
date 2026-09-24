@@ -205,6 +205,7 @@ For a one-off bounded search of recent Latvian Bluesky posts, use:
 ```bash
 harken leads recent --days 5
 harken logs
+harken leads source-status
 ```
 
 The recent scan deliberately uses broader discovery terms such as `Shopify`,
