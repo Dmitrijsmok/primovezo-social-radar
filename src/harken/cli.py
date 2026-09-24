@@ -322,9 +322,7 @@ def primovezo_live_email_test(
                         mention.suggested_reply = analysis["suggested_reply"]
                     key = (mention.source, mention.id)
                     existing = sample_by_key.get(key)
-                    if existing is None or (mention.lead_score or -1) > (
-                        existing.lead_score or -1
-                    ):
+                    if existing is None or (mention.lead_score or -1) > (existing.lead_score or -1):
                         sample_by_key[key] = mention
         finally:
             pipe.close()
