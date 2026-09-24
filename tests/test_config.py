@@ -78,6 +78,14 @@ def test_blank_env_vars_fall_back_to_defaults(monkeypatch):
     assert cfg.auth_mode == "none"
 
 
+def test_partial_bluesky_authenticated_fallback_is_rejected(monkeypatch):
+    monkeypatch.setenv("HARKEN_BLUESKY_IDENTIFIER", "radar.bsky.social")
+    monkeypatch.delenv("HARKEN_BLUESKY_APP_PASSWORD", raising=False)
+
+    with pytest.raises(ValueError, match="HARKEN_BLUESKY_IDENTIFIER"):
+        config.Config()
+
+
 def test_webhook_url_is_loaded(monkeypatch):
     monkeypatch.setenv("HARKEN_WEBHOOK_URL", "https://alerts.example.test/harken")
     assert config.Config().webhook_url == "https://alerts.example.test/harken"
@@ -101,6 +109,9 @@ def test_account_auth_settings_are_loaded(monkeypatch):
 
 def test_keyed_source_credentials_are_loaded_and_routed(monkeypatch):
     monkeypatch.setenv("HARKEN_BLUESKY_LANG", "lv")
+    monkeypatch.setenv("HARKEN_BLUESKY_IDENTIFIER", "radar.bsky.social")
+    monkeypatch.setenv("HARKEN_BLUESKY_APP_PASSWORD", "app-pass")
+    monkeypatch.setenv("HARKEN_BLUESKY_PDS", "https://bsky.social/")
     monkeypatch.setenv("HARKEN_X_BEARER_TOKEN", "x-token")
     monkeypatch.setenv("HARKEN_YOUTUBE_API_KEY", "youtube-key")
     monkeypatch.setenv("HARKEN_MASTODON_INSTANCE", "mastodon.social")
@@ -114,7 +125,12 @@ def test_keyed_source_credentials_are_loaded_and_routed(monkeypatch):
 
     cfg = config.Config()
 
-    assert cfg.source_options("bluesky") == {"lang": "lv"}
+    assert cfg.source_options("bluesky") == {
+        "lang": "lv",
+        "identifier": "radar.bsky.social",
+        "app_password": "app-pass",
+        "pds": "https://bsky.social",
+    }
     assert cfg.source_options("x") == {"bearer_token": "x-token"}
     assert cfg.source_options("youtube") == {"api_key": "youtube-key"}
     assert cfg.source_options("mastodon") == {
