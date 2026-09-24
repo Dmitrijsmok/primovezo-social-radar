@@ -68,7 +68,7 @@ app.add_typer(threads_app, name="threads")
 console = Console()
 
 
-PRIMOVEZO_ALLOWED_SOURCES = {"bluesky", "threads", "x"}
+PRIMOVEZO_ALLOWED_SOURCES = {"bluesky", "mastodon", "threads", "x", "youtube"}
 
 
 def _prepare_primovezo_threads(cfg: Config) -> str | None:
@@ -106,10 +106,30 @@ def _prepare_primovezo_threads(cfg: Config) -> str | None:
 
 
 def _primovezo_auto_sources(cfg: Config) -> list[str]:
+    """Return Primovezo sources whose required credentials are configured."""
     sources = ["bluesky"]
     if cfg.threads_access_token:
         sources.append("threads")
+    if cfg.x_bearer_token:
+        sources.append("x")
+    if cfg.youtube_api_key:
+        sources.append("youtube")
+    if cfg.mastodon_access_token:
+        sources.append("mastodon")
     return sources
+
+
+def _apply_primovezo_source_locales(cfg: Config) -> None:
+    """Bias provider-side discovery to Latvia/Latvian before strict AI filtering."""
+    if "bluesky" in cfg.sources:
+        cfg.bluesky_lang = "lv"
+    if "x" in cfg.sources:
+        cfg.x_lang = "lv"
+    if "youtube" in cfg.sources:
+        cfg.youtube_relevance_language = "lv"
+        cfg.youtube_region_code = "LV"
+    if "mastodon" in cfg.sources:
+        cfg.mastodon_lang = "lv"
 
 
 @threads_app.command("status")
@@ -346,8 +366,8 @@ def leads_primovezo(
     sources: str = typer.Option(
         None,
         help=(
-            "Comma-separated sources. Default: Bluesky plus Threads when "
-            "HARKEN_THREADS_ACCESS_TOKEN is configured."
+            "Comma-separated sources. Default: Bluesky plus any configured "
+            "Threads, X, YouTube, and Mastodon sources."
         ),
     ),
     limit: int = typer.Option(50, min=1, max=100, help="Max items per source and keyword."),
@@ -386,8 +406,7 @@ def leads_primovezo(
             param_hint="--sources",
         )
     cfg.lead_enabled = True
-    if "bluesky" in cfg.sources:
-        cfg.bluesky_lang = "lv"
+    _apply_primovezo_source_locales(cfg)
     if cfg.lead_llm_provider.strip().lower() in {"", "none", "null"}:
         raise typer.BadParameter(
             "Primovezo lead scanning requires HARKEN_LEAD_LLM_PROVIDER.",
@@ -652,7 +671,7 @@ def leads_recent(
     cfg.threads_access_token = base_cfg.threads_access_token
     cfg.lead_enabled = True
     cfg.lead_fallback_alerts = False
-    cfg.bluesky_lang = "lv"
+    _apply_primovezo_source_locales(cfg)
     cfg.source_retries = max(cfg.source_retries, 3)
     cfg.retry_backoff = max(cfg.retry_backoff, 10.0)
 
