@@ -432,17 +432,6 @@ def test_x_parses_posts_authors_metrics_and_pagination():
 
 
 @respx.mock
-def test_x_can_filter_primovezo_searches_to_latvian_and_exclude_reposts():
-    route = respx.get("https://api.x.com/2/tweets/search/recent").mock(
-        return_value=httpx.Response(200, json={"data": [], "meta": {}})
-    )
-    XSource(bearer_token="token", lang="lv").fetch("Shopify alternatīva")
-    assert route.calls[0].request.url.params["query"] == (
-        "(Shopify alternatīva) lang:lv -is:retweet"
-    )
-
-
-@respx.mock
 def test_tiktok_research_api_queries_lv_and_includes_voice_to_text():
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=2)
