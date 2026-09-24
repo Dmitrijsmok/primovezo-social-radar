@@ -1,8 +1,7 @@
 """Source adapter tests — HTTP is mocked, so these run offline and deterministically."""
 
-from datetime import datetime, timedelta, timezone
-
 import json
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
