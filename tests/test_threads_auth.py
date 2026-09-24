@@ -91,9 +91,7 @@ def test_maintain_threads_token_refreshes_near_expiry_and_persists_atomically(
     params = refresh.calls[0].request.url.params
     assert params["grant_type"] == "th_refresh_token"
     assert params["access_token"] == "old-token"
-    assert env_path.read_text() == (
-        "KEEP=value\nHARKEN_THREADS_ACCESS_TOKEN=refreshed-token\n"
-    )
+    assert env_path.read_text() == ("KEEP=value\nHARKEN_THREADS_ACCESS_TOKEN=refreshed-token\n")
     assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
     assert os.environ["HARKEN_THREADS_ACCESS_TOKEN"] == "refreshed-token"
 
