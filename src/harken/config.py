@@ -157,6 +157,9 @@ class Config:
     mastodon_access_token: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_MASTODON_ACCESS_TOKEN") or None
     )
+    mastodon_lang: str | None = field(
+        default_factory=lambda: (os.getenv("HARKEN_MASTODON_LANG") or "").strip() or None
+    )
     reddit_client_id: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_REDDIT_CLIENT_ID") or None
     )
@@ -285,6 +288,7 @@ class Config:
             return {
                 "instance": self.mastodon_instance,
                 "access_token": self.mastodon_access_token,
+                "lang": self.mastodon_lang,
             }
         if name == "reddit":
             return {
