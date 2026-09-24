@@ -249,6 +249,34 @@ def test_bluesky_public_block_without_auth_has_actionable_sanitized_error():
 
 
 @respx.mock
+def test_bluesky_login_error_is_sanitized_but_actionable():
+    BlueskySource._session_cache.clear()
+    secret = "abcd-efgh-ijkl-mnop"
+    respx.post("https://bsky.social/xrpc/com.atproto.server.createSession").mock(
+        return_value=httpx.Response(
+            401,
+            json={
+                "error": "AuthenticationRequired",
+                "message": "Invalid identifier or password",
+            },
+        )
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        BlueskySource(
+            identifier="radar.bsky.social",
+            app_password=secret,
+        ).fetch("Shopify")
+
+    message = str(exc.value)
+    assert "HTTP 401" in message
+    assert "AuthenticationRequired" in message
+    assert "Invalid identifier or password" in message
+    assert secret not in message
+    assert "accessJwt" not in message
+
+
+@respx.mock
 def test_bluesky_authenticated_proxy_relogs_once_after_expired_session():
     BlueskySource._session_cache.clear()
     login = respx.post("https://bsky.social/xrpc/com.atproto.server.createSession").mock(
