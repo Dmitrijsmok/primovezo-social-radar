@@ -109,10 +109,9 @@ def test_keyed_source_credentials_are_loaded_and_routed(monkeypatch):
     monkeypatch.setenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", "instagram-token")
     monkeypatch.setenv("HARKEN_INSTAGRAM_USER_ID", "ig-user-id")
     monkeypatch.setenv("HARKEN_INSTAGRAM_GRAPH_BASE", "https://graph.facebook.com/v99.0")
-    monkeypatch.setenv("HARKEN_TIKTOK_APIFY_TOKEN", "apify-token")
-    monkeypatch.setenv("HARKEN_TIKTOK_APIFY_ACTOR", "clockworks~tiktok-scraper")
-    monkeypatch.setenv("HARKEN_TIKTOK_PROXY_COUNTRY", "lv")
-    monkeypatch.setenv("HARKEN_TIKTOK_MAX_RESULTS", "12")
+    monkeypatch.setenv("HARKEN_TIKTOK_CLIENT_KEY", "research-key")
+    monkeypatch.setenv("HARKEN_TIKTOK_CLIENT_SECRET", "research-secret")
+    monkeypatch.setenv("HARKEN_TIKTOK_REGION_CODE", "lv")
 
     cfg = config.Config()
 
@@ -129,10 +128,9 @@ def test_keyed_source_credentials_are_loaded_and_routed(monkeypatch):
         "graph_base": "https://graph.facebook.com/v99.0",
     }
     assert cfg.source_options("tiktok") == {
-        "apify_token": "apify-token",
-        "actor": "clockworks~tiktok-scraper",
-        "proxy_country": "LV",
-        "max_results": 12,
+        "client_key": "research-key",
+        "client_secret": "research-secret",
+        "region_code": "LV",
     }
 
 def test_email_delivery_settings_are_loaded(monkeypatch):
