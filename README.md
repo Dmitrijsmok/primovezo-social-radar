@@ -129,16 +129,15 @@ are intentionally outside the Primovezo profile. It enables lead mode automatica
 uses Bluesky by default, and waits 5 seconds between keywords to reduce burst
 throttling. For the Primovezo runner specifically, transient source failures get at
 least 3 retries; a Bluesky 403 uses a 10s, 20s, 40s exponential backoff. General
-Harken retry defaults remain unchanged. The Primovezo Latvia Radar currently allows
-Bluesky, Threads, X, Instagram hashtag discovery, and optional TikTok organic keyword
-discovery. Bluesky always runs; keyed sources are auto-enabled only when their required
-credentials are configured. Reddit, Mastodon, YouTube, and LinkedIn are intentionally
-outside the Primovezo lead-radar profile. Facebook public-post keyword search is not
-treated as an available Graph API source.
+Harken retry defaults remain unchanged. The Primovezo Latvia Radar currently allows Bluesky, Threads, and Instagram hashtag
+discovery. Bluesky always runs; Threads and Instagram are auto-enabled only when their
+required official credentials are configured. X, TikTok, Reddit, Mastodon, YouTube, and
+LinkedIn are intentionally outside the commercial Primovezo lead-radar profile. Facebook
+public-post keyword search is not treated as an available Graph API source.
 
 ```bash
 harken leads primovezo --sources bluesky,threads
-harken leads primovezo --sources bluesky,threads,x
+harken leads primovezo --sources bluesky,threads,instagram
 harken leads primovezo --limit 25 --delay 8
 ```
 
@@ -226,9 +225,8 @@ uv run harken leads primovezo
 ```
 
 The daily Primovezo runner scans both the direct-intent and broader discovery profiles.
-It always scans Bluesky and automatically adds configured Threads, X, Instagram, and
-TikTok sources. TikTok is intentionally limited to the broader discovery keyword set,
-rather than the longer direct-intent phrases, to keep paid scraping focused.
+It always scans Bluesky and automatically adds configured Threads and Instagram sources.
+Paid or research-only sources are not auto-enabled in the Primovezo lead runner.
 
 Run that command once per day with cron or a systemd timer. In the Primovezo production
 setup, new qualified leads are delivered through Resend to `HARKEN_RESEND_TO`, from
@@ -383,7 +381,7 @@ Only ✅ items are **built today**. 🚧 = on the [roadmap](#roadmap).
 | Web dashboard + CLI | ✅ | ✅ (web) |
 | X/Twitter and YouTube | ✅ (BYO key) | ✅ |
 | Instagram hashtag discovery | ✅ (BYO Meta access) | ✅ |
-| TikTok organic discovery | ✅ (BYO Apify token) | ✅ |
+| TikTok research discovery | ✅ (approved Research Tools client) | partial |
 | Slack / generic webhook alerts | ✅ | ✅ |
 | Email alerts | ✅ | ✅ |
 | Scheduled polling | ✅ | ✅ |
@@ -398,9 +396,10 @@ Only ✅ items are **built today**. 🚧 = on the [roadmap](#roadmap).
 | Hacker News | ✅ | Public Algolia API — no key; service limit is 10,000 requests/hour/IP. |
 | Bluesky | ✅ | Public AT Protocol AppView search — no key. |
 | Stack Overflow | ✅ | Public Stack Exchange question search; Harken preserves API backoff and anonymous quota state. |
-| X / Twitter | needs bearer token | X API v2 recent-post search; Primovezo adds `lang:lv` and excludes reposts. |
+| X / Twitter | needs bearer token | X API v2 recent-post search; generic Harken source only. |
 | YouTube | needs API key | YouTube Data API v3 video search, ordered by publication time; provider quota applies. |
 | Instagram | needs Meta access | Official hashtag search + recent public media; requires Facebook Login, an Instagram professional account, and hashtag access. |
+| TikTok Research | approved research client | Official public-video query with keyword, region filtering, captions, engagement metadata, and available `voice_to_text`. Not used by the commercial Primovezo lead runner. |
 | Reddit | needs OAuth | Set a Reddit app client or access token; anonymous JSON search is no longer reliable. |
 | Mastodon | usually needs token | Status full-text search depends on the instance and normally needs a user token. |
 | RSS / Atom | needs feeds | Point it at any feed — a blog, a news site, or a Google Alerts RSS. |
@@ -424,6 +423,8 @@ Everything is optional and has a sane default — see [`.env.example`](.env.exam
 | `HARKEN_RSS_FEEDS` | — | Comma-separated feed URLs. |
 | `HARKEN_X_BEARER_TOKEN` | — | App-only bearer token for X API v2 recent search. |
 | `HARKEN_YOUTUBE_API_KEY` | — | API key for YouTube Data API v3 video search. |
+| `HARKEN_TIKTOK_CLIENT_KEY` / `HARKEN_TIKTOK_CLIENT_SECRET` | — | Approved TikTok Research Tools client credentials. |
+| `HARKEN_TIKTOK_REGION_CODE` | `LV` | Research API creator-registration region filter. |
 | `HARKEN_WEBHOOK_URL` | — | Generic or Slack webhook for mention and threshold alerts. |
 | `HARKEN_RESEND_API_KEY` | — | Resend API key for the Primovezo internal lead digest. |
 | `HARKEN_RESEND_FROM` | `noreply@primovezo.com` | Sender for the Primovezo internal lead digest. |
@@ -445,7 +446,9 @@ Everything is optional and has a sane default — see [`.env.example`](.env.exam
 
 Reddit accepts `HARKEN_REDDIT_CLIENT_ID` plus `HARKEN_REDDIT_CLIENT_SECRET`, or an existing `HARKEN_REDDIT_ACCESS_TOKEN`. Mastodon accepts `HARKEN_MASTODON_ACCESS_TOKEN`. See [`.env.example`](.env.example) for the full set.
 
-X accepts `HARKEN_X_BEARER_TOKEN`; YouTube accepts `HARKEN_YOUTUBE_API_KEY`. Both adapters support incremental time boundaries and persisted pagination cursors. Harken never logs either credential. See the official [X recent-search documentation](https://docs.x.com/x-api/posts/search/integrate/overview) and [YouTube `search.list` reference](https://developers.google.com/youtube/v3/docs/search/list) for access and quota requirements.
+X accepts `HARKEN_X_BEARER_TOKEN`; YouTube accepts `HARKEN_YOUTUBE_API_KEY`. Both remain generic Harken sources and are not auto-enabled by the Primovezo lead runner. Harken never logs either credential. See the official [X recent-search documentation](https://docs.x.com/x-api/posts/search/integrate/overview) and [YouTube `search.list` reference](https://developers.google.com/youtube/v3/docs/search/list) for access and quota requirements.
+
+TikTok uses the official Research API only. It requires an approved Research Tools project and `HARKEN_TIKTOK_CLIENT_KEY` plus `HARKEN_TIKTOK_CLIENT_SECRET`. Harken exchanges those for a short-lived client token, queries recent public videos, and requests caption plus available `voice_to_text`. TikTok's keyword condition matches the video description, so speech text enriches analysis but is not itself a discovery index. Research Tools eligibility is non-commercial; the source is therefore deliberately excluded from `harken leads primovezo`.
 
 Harken stores its database locally and sends no telemetry. Tracking necessarily sends your search term to the source APIs you enable. Selecting Anthropic or OpenAI for optional theme labels also sends a small sample of mention text to that provider; the default local analyzer and Ollama do not.
 
@@ -486,7 +489,8 @@ Built today is everything marked ✅ above. Production-readiness work, in priori
 - [x] **Structured logs and per-source latency/error metrics**.
 - [x] **Stack Overflow** via the public Stack Exchange API.
 - [x] **X/Twitter and YouTube keyed sources** with incremental boundaries and pagination.
-- [ ] **Additional locked-platform sources** such as TikTok or Instagram, subject to operator-selected API access.
+- [x] **TikTok Research API** as an approved-research generic source, kept outside commercial lead discovery.
+- [ ] **Additional locked-platform commercial organic sources**, subject to official API availability and acceptable access terms.
 - [x] **Measured analyzer evaluation dataset, reports, and CI quality gate**.
 - [x] **Optional batched LLM sentiment** with strict validation and local fallback.
 
