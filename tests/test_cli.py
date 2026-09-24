@@ -15,7 +15,7 @@ import respx
 from typer.testing import CliRunner
 
 from harken import cli
-from harken.models import Mention
+from harken.models import ConversationPost, Mention
 from harken.store import Store
 
 runner = CliRunner()
@@ -584,27 +584,48 @@ def test_live_email_test_uses_isolated_db_and_real_classification(monkeypatch):
         def track(self, query, **kwargs):
             calls.append((query, kwargs))
             candidates = []
+            fetched_mentions = []
             fetched = 0
             if query == "interneta veikals":
                 fetched = 2
-                candidates = [
-                    Mention(
-                        source="bluesky",
-                        query=query,
-                        author="shop.bsky.social",
-                        text="Meklēju risinājumu interneta veikalam",
-                        url="https://bsky.app/profile/shop/post/1",
-                        created_at=datetime(2026, 9, 24, tzinfo=timezone.utc),
-                        lead_relevant=True,
-                        lead_score=91,
-                        lead_category="ecommerce",
-                    )
-                ]
+                own = Mention(
+                    source="threads",
+                    query=query,
+                    author="dmitry.mokeyev",
+                    text="Mans paša reply par interneta veikaliem",
+                    url="https://threads.test/own-reply",
+                    created_at=datetime(2026, 9, 24, tzinfo=timezone.utc),
+                    conversation=[
+                        ConversationPost(
+                            id="own-reply",
+                            author="dmitry.mokeyev",
+                            text="Mans paša reply par interneta veikaliem",
+                            url="https://threads.test/own-reply",
+                            created_at=datetime(2026, 9, 24, tzinfo=timezone.utc),
+                            depth=0,
+                            matched=True,
+                        )
+                    ],
+                )
+                prospect = Mention(
+                    source="bluesky",
+                    query=query,
+                    author="shop.bsky.social",
+                    text="Meklēju risinājumu interneta veikalam",
+                    url="https://bsky.app/profile/shop/post/1",
+                    created_at=datetime(2026, 9, 24, tzinfo=timezone.utc),
+                    lead_relevant=True,
+                    lead_score=91,
+                    lead_category="ecommerce",
+                )
+                fetched_mentions = [own, prospect]
+                candidates = [prospect]
             return SimpleNamespace(
                 fetched=fetched,
                 errors={},
                 lead_analysis_error=None,
                 lead_candidate_mentions=candidates,
+                fetched_mentions=fetched_mentions,
             )
 
         def close(self):
@@ -644,6 +665,9 @@ def test_live_email_test_uses_isolated_db_and_real_classification(monkeypatch):
     assert sent["qualified"] == 1
     assert sent["sources"] == ["bluesky"]
     assert sent["issues"] == []
+    assert len(sent["excluded_mentions"]) == 1
+    assert sent["excluded_mentions"][0].author == "dmitry.mokeyev"
+    assert sent["excluded_mentions"][0].conversation[0].matched is True
     assert len(sent["mentions"]) == 1
     assert sent["mentions"][0].author == "shop.bsky.social"
     assert sent["mentions"][0].lead_relevant is True
