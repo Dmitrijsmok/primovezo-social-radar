@@ -72,6 +72,7 @@ PRIMOVEZO_ALLOWED_SOURCES = {
     "bluesky",
     "instagram",
     "threads",
+    "tiktok",
     "x",
 }
 
@@ -119,6 +120,8 @@ def _primovezo_auto_sources(cfg: Config) -> list[str]:
         sources.append("x")
     if cfg.instagram_access_token and cfg.instagram_user_id:
         sources.append("instagram")
+    if cfg.tiktok_apify_token:
+        sources.append("tiktok")
     return sources
 
 
@@ -186,6 +189,11 @@ def primovezo_source_status():
             "instagram",
             bool(cfg.instagram_access_token and cfg.instagram_user_id),
             "public hashtag recent media",
+        ),
+        (
+            "tiktok",
+            bool(cfg.tiktok_apify_token),
+            "organic keyword video search via Apify · LV proxy · discovery queries only",
         ),
     ]
     for source, configured, notes in rows:
@@ -401,7 +409,7 @@ def leads_primovezo(
         None,
         help=(
             "Comma-separated sources. Default: Bluesky plus any configured "
-            "Threads, X, and Instagram sources."
+            "Threads, X, Instagram, and TikTok sources."
         ),
     ),
     limit: int = typer.Option(50, min=1, max=100, help="Max items per source and keyword."),
@@ -512,11 +520,21 @@ def leads_primovezo(
     failed_keywords = 0
     lead_fallbacks = 0
     pipe = Pipeline(scan_cfg)
+    direct_cfg = scan_cfg
+    direct_pipe = None
+    if "tiktok" in scan_cfg.sources:
+        direct_cfg = replace(
+            scan_cfg,
+            sources=[source for source in scan_cfg.sources if source != "tiktok"],
+        )
+        direct_pipe = Pipeline(direct_cfg)
     try:
         for index, (group, query) in enumerate(keywords, start=1):
             console.print(f"[dim]{index}/{len(keywords)}[/dim] [bold]{group}[/bold] · “{query}”")
+            active_pipe = pipe if group == "discovery" or direct_pipe is None else direct_pipe
+            active_cfg = scan_cfg if active_pipe is pipe else direct_cfg
             try:
-                result = pipe.track(query, pages=pages)
+                result = active_pipe.track(query, pages=pages)
             except KeyboardInterrupt:
                 raise
             except Exception as exc:
@@ -533,7 +551,7 @@ def leads_primovezo(
                     )
                 _print_retries(result)
 
-                source_count = len({name for name in scan_cfg.sources if name.strip()})
+                source_count = len({name for name in active_cfg.sources if name.strip()})
                 source_failed = bool(source_count and len(result.errors) == source_count)
                 if source_failed:
                     failed_keywords += 1
@@ -611,6 +629,8 @@ def leads_primovezo(
         console.print("\n[dim]Primovezo lead scan stopped.[/dim]")
         raise typer.Exit(130) from None
     finally:
+        if direct_pipe is not None:
+            direct_pipe.close()
         pipe.close()
 
     if operational_issues and failed_keywords < len(keywords):
