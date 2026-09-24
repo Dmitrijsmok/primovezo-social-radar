@@ -69,14 +69,13 @@ class ThreadsSource(Source):
             data = response.json()
 
             mentions: list[Mention] = []
-            own_replies: dict[str, dict] | None = None
             for post in data.get("data", []):
                 post_id = str(post.get("id") or "").strip()
 
-                # Keyword search may return HTTP 200 while silently omitting
-                # reply-only relation fields. Ask the media-object endpoint
-                # whenever relation metadata is absent, not only after a
-                # keyword-search field rejection.
+                # Keyword search can return HTTP 200 while omitting relationship
+                # fields. Ask the media-object endpoint once for canonical
+                # relation metadata before deciding whether the hit is safe to
+                # classify.
                 needs_relation_detail = (
                     relation_fallback
                     or "is_reply" not in post
@@ -87,20 +86,15 @@ class ThreadsSource(Source):
                     if detail:
                         post = {**post, **detail}
 
-                # Meta exposes a dedicated /me/replies surface for the
-                # authenticated user's own replies. Use it as a second official
-                # fallback when a keyword result still lacks root/replied_to
-                # metadata after direct media lookup.
-                still_missing_relation = (
-                    "is_reply" not in post
-                    or (post.get("is_reply") is True and not _relation_id(post.get("root_post")))
-                )
-                if still_missing_relation and post_id:
-                    if own_replies is None:
-                        own_replies = _fetch_own_replies(client)
-                    own_detail = own_replies.get(post_id)
-                    if own_detail:
-                        post = {**post, **own_detail}
+                # Meta currently sometimes returns is_reply=true without the
+                # documented root_post/replied_to IDs, even with
+                # threads_read_replies. Never treat such an isolated reply as
+                # the source lead: its author may be only a participant in a
+                # different person's commercial-intent conversation.
+                if "is_reply" not in post:
+                    continue
+                if post.get("is_reply") is True and not _relation_id(post.get("root_post")):
+                    continue
 
                 mention = _mention_with_context(client, query, post)
                 if mention is not None:
@@ -160,29 +154,6 @@ def _fetch_reply_detail(client: httpx.Client, thread_id: str) -> dict | None:
     response.raise_for_status()
     value = response.json()
     return value if isinstance(value, dict) else None
-
-
-def _fetch_own_replies(client: httpx.Client) -> dict[str, dict]:
-    response = client.get(
-        f"{_GRAPH}/me/replies",
-        params={
-            "fields": _REPLY_FIELDS,
-            "limit": 50,
-        },
-    )
-    if response.status_code in {400, 403, 404}:
-        return {}
-    response.raise_for_status()
-    value = response.json()
-    data = value.get("data", []) if isinstance(value, dict) else []
-    replies: dict[str, dict] = {}
-    for item in data:
-        if not isinstance(item, dict):
-            continue
-        item_id = str(item.get("id") or "").strip()
-        if item_id:
-            replies[item_id] = item
-    return replies
 
 
 def _fetch_thread(client: httpx.Client, thread_id: str) -> dict | None:
