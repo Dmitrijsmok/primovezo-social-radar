@@ -259,6 +259,69 @@ def send_lead_digest_resend(settings: ResendSettings, mentions: list[Mention]) -
         raise ResendDeliveryError(f"Resend request failed: {type(exc).__name__}") from None
 
 
+def send_live_test_resend(
+    settings: ResendSettings,
+    mentions: list[Mention],
+    *,
+    fetched: int,
+    qualified: int,
+    sources: list[str],
+    issues: list[str] | None = None,
+) -> None:
+    """Send one clearly marked live-source diagnostic digest through Resend."""
+    configured = settings.validated()
+    run_at = datetime.now(timezone.utc)
+    cleaned_issues = [issue.strip() for issue in issues or [] if issue and issue.strip()]
+    source_names = list(dict.fromkeys(source.strip() for source in sources if source.strip()))
+    subject = (
+        f"[Primovezo Social Radar TEST] live scan: {fetched} fetched, "
+        f"{qualified} qualified"
+    )
+    body = _live_test_text(
+        mentions,
+        fetched=fetched,
+        qualified=qualified,
+        sources=source_names,
+        issues=cleaned_issues,
+        run_at=run_at,
+    )
+    identity = (
+        configured.sender
+        + "|"
+        + ",".join(sorted(configured.recipients, key=str.casefold))
+        + "|"
+        + run_at.isoformat()
+        + "|"
+        + body
+    )
+    idempotency_key = (
+        "primovezo-live-test/"
+        + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:48]
+    )
+    try:
+        response = httpx.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {configured.api_key}",
+                "Content-Type": "application/json",
+                "Idempotency-Key": idempotency_key,
+                "User-Agent": USER_AGENT,
+            },
+            json={
+                "from": configured.sender,
+                "to": list(configured.recipients),
+                "subject": subject,
+                "text": body,
+            },
+            timeout=configured.timeout,
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise ResendDeliveryError(f"Resend returned HTTP {exc.response.status_code}") from None
+    except httpx.RequestError as exc:
+        raise ResendDeliveryError(f"Resend request failed: {type(exc).__name__}") from None
+
+
 def send_operational_resend(
     settings: ResendSettings,
     *,
@@ -476,6 +539,69 @@ def _lead_alert_text(query: str, mentions: list[Mention]) -> str:
             lines.append(f"  Open: {mention.url}")
     if count > 10:
         lines.append(f"…and {count - 10} more")
+    return "\n".join(lines)
+
+
+def _live_test_text(
+    mentions: list[Mention],
+    *,
+    fetched: int,
+    qualified: int,
+    sources: list[str],
+    issues: list[str],
+    run_at: datetime,
+) -> str:
+    lines = [
+        "Primovezo Social Radar live delivery test",
+        "",
+        "TEST ONLY. These are real public-source fetch results. No social author was contacted.",
+        f"Scanned at: {run_at.isoformat()}",
+        f"Sources: {', '.join(sources) if sources else 'none'}",
+        f"Fetched: {fetched}",
+        f"Qualified at the configured production threshold: {qualified}",
+    ]
+    if issues:
+        lines.extend(["", "Operational issues:"])
+        lines.extend(f"- {issue}" for issue in issues[:20])
+
+    if not mentions:
+        lines.extend(
+            [
+                "",
+                "No matching public posts were returned by this live test.",
+                "The source-to-Resend delivery path still completed successfully.",
+            ]
+        )
+        return "\n".join(lines)
+
+    lines.extend(["", f"Live sample ({min(len(mentions), 10)}):"])
+    for mention in mentions[:10]:
+        excerpt = " ".join(mention.content.split())[:500]
+        source = mention.source
+        if mention.author:
+            source += f" · {mention.author}"
+        score = "unavailable" if mention.lead_score is None else f"{mention.lead_score}/100"
+        relevant = (
+            "unclassified"
+            if mention.lead_relevant is None
+            else ("yes" if mention.lead_relevant else "no")
+        )
+        lines.extend(
+            [
+                "",
+                f"• {source} · query: {mention.query}",
+                f"  AI relevant: {relevant} · score: {score}"
+                + (f" · {mention.lead_category}" if mention.lead_category else ""),
+            ]
+        )
+        if mention.lead_reason:
+            lines.append(f"  Reason: {mention.lead_reason}")
+        lines.append(f"  {excerpt}")
+        if mention.url:
+            lines.append(f"  Open: {mention.url}")
+
+    if len(mentions) > 10:
+        lines.append(f"…and {len(mentions) - 10} more fetched sample item(s)")
     return "\n".join(lines)
 
 
