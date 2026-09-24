@@ -8,6 +8,7 @@ import re
 import smtplib
 import ssl
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from urllib.parse import urlsplit
 
@@ -296,6 +297,7 @@ def send_operational_resend(
     )
     body = "\n".join(lines)
     digest_identity = "|".join(cleaned)
+    run_date = datetime.now(timezone.utc).date().isoformat()
     idempotency_key = (
         "primovezo-ops-warning/"
         + hashlib.sha256(
@@ -303,6 +305,8 @@ def send_operational_resend(
                 configured.sender
                 + "|"
                 + ",".join(sorted(configured.recipients, key=str.casefold))
+                + "|"
+                + run_date
                 + "|"
                 + run_label
                 + "|"
