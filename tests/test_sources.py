@@ -240,9 +240,9 @@ def test_bluesky_auto_discovers_account_pds_from_handle_did_document():
     did = "did:plc:zhlgr4h57wecaecsmbvugeop"
     pds = "https://coral.us-east.host.bsky.network"
 
-    well_known = respx.get(
-        "https://dorsmok.bsky.social/.well-known/atproto-did"
-    ).mock(return_value=httpx.Response(200, text=did))
+    well_known = respx.get("https://dorsmok.bsky.social/.well-known/atproto-did").mock(
+        return_value=httpx.Response(200, text=did)
+    )
     plc = respx.get(f"https://plc.directory/{did}").mock(
         return_value=httpx.Response(
             200,
