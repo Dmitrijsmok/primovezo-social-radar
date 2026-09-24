@@ -16,6 +16,7 @@ from harken.sources.reddit import RedditSource
 from harken.sources.rss import RSSSource
 from harken.sources.stackoverflow import StackOverflowSource
 from harken.sources.threads import ThreadsSource
+from harken.sources.tiktok import TikTokSource
 from harken.sources.x import XSource
 from harken.sources.youtube import YouTubeSource
 
@@ -28,6 +29,7 @@ REGISTRY: dict[str, type[Source]] = {
     RSSSource.name: RSSSource,
     StackOverflowSource.name: StackOverflowSource,
     ThreadsSource.name: ThreadsSource,
+    TikTokSource.name: TikTokSource,
     XSource.name: XSource,
     YouTubeSource.name: YouTubeSource,
 }
