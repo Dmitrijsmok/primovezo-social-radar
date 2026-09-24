@@ -92,9 +92,10 @@ remain, Harken calls the Threads refresh endpoint and atomically updates only
 remains in use if a refresh attempt fails while it is still valid, so the next daily
 run can retry.
 
-Check token health at any time without exposing the secret:
+Check configured social sources and Threads token health without exposing secrets:
 
 ```bash
+harken leads source-status
 harken threads status
 ```
 
