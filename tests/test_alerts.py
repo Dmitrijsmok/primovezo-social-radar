@@ -27,7 +27,7 @@ from harken.alerts import (
     webhook_target_key,
 )
 from harken.config import Config
-from harken.models import Mention, Sentiment
+from harken.models import ConversationPost, Mention, Sentiment
 from harken.pipeline import Pipeline
 from harken.sources import REGISTRY
 from harken.thresholds import ThresholdEvent
@@ -287,6 +287,65 @@ def test_live_test_resend_is_clearly_marked_and_contains_real_classification():
     assert "https://bsky.app/profile/shop/post/1" in payload["text"]
     assert "threads fetch failed" in payload["text"]
     assert "re_test_secret" not in payload["text"]
+
+
+@respx.mock
+def test_live_test_resend_renders_threads_conversation_hierarchy():
+    route = respx.post("https://api.resend.com/emails").mock(
+        return_value=httpx.Response(200, json={"id": "email_thread_tree"})
+    )
+    settings = ResendSettings(
+        api_key="re_test_secret",
+        sender="noreply@primovezo.com",
+        recipients=("owner@example.test",),
+    )
+    mention = Mention(
+        source="threads",
+        query="Shopify",
+        author="shop.owner",
+        text="Kuru platformu izvēlēties interneta veikalam?",
+        url="https://threads.test/root",
+        created_at=datetime(2026, 9, 24, 8, 0, tzinfo=timezone.utc),
+        lead_relevant=True,
+        lead_score=91,
+        lead_category="conversation",
+        lead_reason="Platformas izvēles diskusija.",
+        conversation=[
+            ConversationPost(
+                id="root",
+                author="shop.owner",
+                text="Kuru platformu izvēlēties interneta veikalam?",
+                url="https://threads.test/root",
+                created_at=datetime(2026, 9, 24, 8, 0, tzinfo=timezone.utc),
+                depth=0,
+            ),
+            ConversationPost(
+                id="reply",
+                author="dmitry.mokeyev",
+                text="Man Shopify vairāk nepatīk par Mozello.",
+                url="https://threads.test/reply",
+                created_at=datetime(2026, 9, 24, 9, 0, tzinfo=timezone.utc),
+                reply_to_id="root",
+                depth=1,
+                matched=True,
+            ),
+        ],
+    )
+
+    send_live_test_resend(
+        settings,
+        [mention],
+        fetched=1,
+        qualified=1,
+        sources=["threads"],
+    )
+
+    payload = json.loads(route.calls[0].request.content)
+    body = payload["text"]
+    assert "Conversation context:" in body
+    assert "ROOT @shop.owner" in body
+    assert "↳ @dmitry.mokeyev [keyword match]" in body
+    assert "Open root/source: https://threads.test/root" in body
 
 
 @respx.mock
