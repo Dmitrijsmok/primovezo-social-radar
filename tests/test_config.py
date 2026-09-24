@@ -102,11 +102,26 @@ def test_account_auth_settings_are_loaded(monkeypatch):
 def test_keyed_source_credentials_are_loaded_and_routed(monkeypatch):
     monkeypatch.setenv("HARKEN_BLUESKY_LANG", "lv")
     monkeypatch.setenv("HARKEN_X_BEARER_TOKEN", "x-token")
+    monkeypatch.setenv("HARKEN_X_LANG", "lv")
     monkeypatch.setenv("HARKEN_YOUTUBE_API_KEY", "youtube-key")
+    monkeypatch.setenv("HARKEN_YOUTUBE_RELEVANCE_LANGUAGE", "lv")
+    monkeypatch.setenv("HARKEN_YOUTUBE_REGION_CODE", "lv")
+    monkeypatch.setenv("HARKEN_MASTODON_INSTANCE", "mastodon.social")
+    monkeypatch.setenv("HARKEN_MASTODON_ACCESS_TOKEN", "mastodon-token")
+    monkeypatch.setenv("HARKEN_MASTODON_LANG", "lv")
     cfg = config.Config()
     assert cfg.source_options("bluesky") == {"lang": "lv"}
-    assert cfg.source_options("x") == {"bearer_token": "x-token"}
-    assert cfg.source_options("youtube") == {"api_key": "youtube-key"}
+    assert cfg.source_options("x") == {"bearer_token": "x-token", "lang": "lv"}
+    assert cfg.source_options("youtube") == {
+        "api_key": "youtube-key",
+        "relevance_language": "lv",
+        "region_code": "LV",
+    }
+    assert cfg.source_options("mastodon") == {
+        "instance": "mastodon.social",
+        "access_token": "mastodon-token",
+        "lang": "lv",
+    }
 
 
 def test_email_delivery_settings_are_loaded(monkeypatch):
