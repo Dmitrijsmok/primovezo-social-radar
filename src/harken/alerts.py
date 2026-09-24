@@ -597,9 +597,7 @@ def _live_test_text(
         for mention in excluded_mentions[:10]:
             lines.extend(_excluded_live_sample_lines(mention))
         if len(excluded_mentions) > 10:
-            lines.append(
-                f"…and {len(excluded_mentions) - 10} more excluded diagnostic item(s)"
-            )
+            lines.append(f"…and {len(excluded_mentions) - 10} more excluded diagnostic item(s)")
 
     lines.append("")
     lines.append("The source-to-Resend delivery path completed successfully.")
