@@ -431,6 +431,9 @@ def test_primovezo_auto_enables_threads_when_token_is_configured(tmp_path, monke
     monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
     monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
     monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-token")
+    monkeypatch.delenv("HARKEN_X_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("HARKEN_YOUTUBE_API_KEY", raising=False)
+    monkeypatch.delenv("HARKEN_MASTODON_ACCESS_TOKEN", raising=False)
     monkeypatch.setattr(cli, "_prepare_primovezo_threads", lambda cfg: None)
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
     monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
@@ -470,6 +473,9 @@ def test_primovezo_recent_auto_enables_threads_when_token_is_configured(
     monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
     monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
     monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-token")
+    monkeypatch.delenv("HARKEN_X_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("HARKEN_YOUTUBE_API_KEY", raising=False)
+    monkeypatch.delenv("HARKEN_MASTODON_ACCESS_TOKEN", raising=False)
     monkeypatch.setattr(cli, "_prepare_primovezo_threads", lambda cfg: None)
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
     monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
@@ -481,6 +487,63 @@ def test_primovezo_recent_auto_enables_threads_when_token_is_configured(
 
     assert result.exit_code == 0, result.output
     assert seen == [(("bluesky", "threads"), "threads-token")]
+
+
+def test_primovezo_auto_enables_configured_additional_social_sources(
+    tmp_path, monkeypatch
+):
+    seen = []
+
+    class FakePipeline:
+        def __init__(self, config):
+            seen.append(
+                (
+                    tuple(config.sources),
+                    config.x_lang,
+                    config.youtube_relevance_language,
+                    config.youtube_region_code,
+                    config.mastodon_lang,
+                )
+            )
+
+        def track(self, query, pages=3):
+            return SimpleNamespace(
+                errors={},
+                retry_counts={},
+                lead_analysis_error=None,
+                lead_candidates=0,
+                lead_candidate_mentions=[],
+                fetched=0,
+                new=0,
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.delenv("HARKEN_THREADS_ACCESS_TOKEN", raising=False)
+    monkeypatch.setenv("HARKEN_X_BEARER_TOKEN", "x-token")
+    monkeypatch.setenv("HARKEN_YOUTUBE_API_KEY", "youtube-key")
+    monkeypatch.setenv("HARKEN_MASTODON_ACCESS_TOKEN", "mastodon-token")
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
+
+    result = runner.invoke(
+        cli.app,
+        ["leads", "primovezo", "--delay", "0", "--db", str(tmp_path / "more-sources.db")],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen == [
+        (
+            ("bluesky", "x", "youtube", "mastodon"),
+            "lv",
+            "lv",
+            "LV",
+            "lv",
+        )
+    ]
 
 
 def test_threads_status_reports_health_without_token_value(monkeypatch):
@@ -519,7 +582,7 @@ def test_primovezo_runner_rejects_reddit(monkeypatch):
 
     assert result.exit_code != 0
     assert "does not use: reddit" in result.output
-    assert "bluesky, threads, x" in result.output
+    assert "bluesky, mastodon, threads, x, youtube" in result.output
 
 
 def test_primovezo_runner_sends_one_operational_warning_for_partial_failures(
