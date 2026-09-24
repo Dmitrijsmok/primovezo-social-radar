@@ -90,12 +90,13 @@ HARKEN_BLUESKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
 HARKEN_BLUESKY_PDS=https://bsky.social
 ```
 
-Do not use the main Bluesky account password. Only after both public AppViews answer with
-401/403 does Harken create a short-lived PDS session and proxy
+Do not use the main Bluesky account password. When these credentials are configured, Harken
+skips the public AppView hosts entirely, creates a short-lived PDS session, and proxies
 `app.bsky.feed.searchPosts` to the Bluesky AppView through the official
 `atproto-proxy` service identifier. The app password is never included in search URLs or
-application logs. If no authenticated fallback is configured, a blocked public search fails
-once with an actionable configuration error instead of retrying the same raw 403.
+application logs. Without configured credentials Harken keeps the zero-config public path; if
+both public hosts are blocked it fails once with an actionable configuration error instead of
+retrying the same raw 403.
 
 Quick isolated verification:
 
