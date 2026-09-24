@@ -65,6 +65,19 @@ HARKEN_THREADS_ACCESS_TOKEN=<token>
 Without that variable, Primovezo continues with Bluesky only and prints that Threads
 is disabled.
 
+Use a **long-lived** Threads token. Before every Primovezo daily/recent scan, Harken
+checks its validity, `threads_keyword_search` scope, and expiry. If fewer than 14 days
+remain, Harken calls the Threads refresh endpoint and atomically updates only
+`HARKEN_THREADS_ACCESS_TOKEN` in the repository's local `.env`. The current token
+remains in use if a refresh attempt fails while it is still valid, so the next daily
+run can retry.
+
+Check token health at any time without exposing the secret:
+
+```bash
+harken threads status
+```
+
 ```bash
 uv run harken leads primovezo --limit 10
 harken logs
