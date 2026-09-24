@@ -293,9 +293,7 @@ def test_instagram_resolves_hashtag_and_fetches_recent_public_media():
             json={"data": [{"id": "17843819167049166", "name": "internetveikals"}]},
         )
     )
-    media = respx.get(
-        "https://graph.facebook.com/17843819167049166/recent_media"
-    ).mock(
+    media = respx.get("https://graph.facebook.com/17843819167049166/recent_media").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -448,9 +446,7 @@ def test_tiktok_research_api_queries_lv_and_includes_voice_to_text():
             },
         )
     )
-    query_route = respx.post(
-        "https://open.tiktokapis.com/v2/research/video/query/"
-    ).mock(
+    query_route = respx.post("https://open.tiktokapis.com/v2/research/video/query/").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -535,9 +531,7 @@ def test_tiktok_research_api_returns_opaque_pagination_cursor_and_reuses_token()
             json={"access_token": "research-token", "expires_in": 7200},
         )
     )
-    query_route = respx.post(
-        "https://open.tiktokapis.com/v2/research/video/query/"
-    ).mock(
+    query_route = respx.post("https://open.tiktokapis.com/v2/research/video/query/").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -554,7 +548,7 @@ def test_tiktok_research_api_returns_opaque_pagination_cursor_and_reuses_token()
 
     source = TikTokSource(client_key="key", client_secret="secret")
     first = source.fetch_page("e-komercija")
-    second = source.fetch_page("e-komercija", cursor=first.next_cursor)
+    source.fetch_page("e-komercija", cursor=first.next_cursor)
 
     assert token_route.call_count == 1
     assert query_route.call_count == 2
