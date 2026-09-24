@@ -45,6 +45,11 @@ from harken.pipeline import Pipeline
 from harken.sample_data import DEMO_QUERY, sample_mentions
 from harken.sources import REGISTRY
 from harken.store import Store
+from harken.threads_auth import (
+    ThreadsAuthError,
+    inspect_threads_token,
+    maintain_threads_token,
+)
 
 app = typer.Typer(
     help="Harken — self-hosted social listening. Hear what the internet says about you.",
@@ -57,10 +62,41 @@ user_app = typer.Typer(help="Manage opt-in local dashboard accounts and roles.")
 app.add_typer(user_app, name="user")
 lead_app = typer.Typer(help="Run focused commercial lead-monitoring profiles.")
 app.add_typer(lead_app, name="leads")
+threads_app = typer.Typer(help="Inspect Threads API connectivity and token health.")
+app.add_typer(threads_app, name="threads")
 console = Console()
 
 
 PRIMOVEZO_ALLOWED_SOURCES = {"bluesky", "threads", "x"}
+
+
+def _prepare_primovezo_threads(cfg: Config) -> None:
+    token = cfg.threads_access_token
+    if not token:
+        return
+
+    try:
+        maintenance = maintain_threads_token(token)
+    except ThreadsAuthError as exc:
+        console.print(f"[yellow]![/yellow] Threads token unavailable: {exc}")
+        cfg.threads_access_token = None
+        return
+
+    cfg.threads_access_token = maintenance.token
+    if maintenance.refreshed:
+        expires = (
+            maintenance.info.expires_at.date().isoformat()
+            if maintenance.info.expires_at
+            else "unknown"
+        )
+        console.print(
+            f"[green]✓[/green] Threads token auto-refreshed; new expiry: {expires}"
+        )
+    elif maintenance.refresh_error:
+        console.print(
+            "[yellow]![/yellow] Threads token refresh failed; "
+            f"current valid token kept: {maintenance.refresh_error}"
+        )
 
 
 def _primovezo_auto_sources(cfg: Config) -> list[str]:
@@ -68,6 +104,36 @@ def _primovezo_auto_sources(cfg: Config) -> list[str]:
     if cfg.threads_access_token:
         sources.append("threads")
     return sources
+
+
+@threads_app.command("status")
+def threads_status():
+    """Show Threads token health without exposing the token."""
+    cfg = Config()
+    if not cfg.threads_access_token:
+        console.print("Threads API: not configured")
+        raise typer.Exit(1)
+
+    try:
+        info = inspect_threads_token(cfg.threads_access_token)
+    except ThreadsAuthError as exc:
+        console.print(f"Threads API: unavailable ({exc})")
+        raise typer.Exit(1) from None
+
+    if info.expires_at is None:
+        expiry = "unknown"
+        remaining = "unknown"
+    else:
+        now = datetime.now(timezone.utc)
+        expiry = info.expires_at.isoformat()
+        remaining = f"{max(0, (info.expires_at - now).total_seconds() / 86400):.1f} days"
+
+    keyword = "available" if "threads_keyword_search" in info.scopes else "missing"
+    console.print("Threads API: connected")
+    console.print(f"keyword_search: {keyword}")
+    console.print(f"Token expires: {expiry}")
+    console.print(f"Remaining: {remaining}")
+    console.print("Auto-refresh: enabled when fewer than 14 days remain")
 
 
 def _version(value: bool):
@@ -292,8 +358,10 @@ def leads_primovezo(
 ):
     """Scan the built-in Primovezo Latvian commercial-intent keyword profile."""
     base_cfg = Config()
+    _prepare_primovezo_threads(base_cfg)
     selected_sources = sources or ",".join(_primovezo_auto_sources(base_cfg))
     cfg = _tracking_config(selected_sources, limit, db)
+    cfg.threads_access_token = base_cfg.threads_access_token
     disallowed_sources = sorted(set(cfg.sources) - PRIMOVEZO_ALLOWED_SOURCES)
     if disallowed_sources:
         allowed = ", ".join(sorted(PRIMOVEZO_ALLOWED_SOURCES))
@@ -532,8 +600,10 @@ def leads_recent(
 ):
     """Scan a recent Latvian social window without changing the daily cursor or sending email."""
     base_cfg = Config()
+    _prepare_primovezo_threads(base_cfg)
     selected_sources = _primovezo_auto_sources(base_cfg)
     cfg = _tracking_config(",".join(selected_sources), limit, db)
+    cfg.threads_access_token = base_cfg.threads_access_token
     cfg.lead_enabled = True
     cfg.lead_fallback_alerts = False
     cfg.bluesky_lang = "lv"
