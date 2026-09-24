@@ -313,6 +313,8 @@ def primovezo_live_email_test(
                 )
 
                 for mention in pipe.store.mentions(query=query, limit=None):
+                    if base_cfg.is_lead_author_excluded(mention.author):
+                        continue
                     analysis = pipe.store.lead_analysis(query, mention.id)
                     if analysis is not None:
                         mention.lead_relevant = analysis["relevant"]
