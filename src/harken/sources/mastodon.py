@@ -22,13 +22,11 @@ class MastodonSource(Source):
         self,
         instance: str = "mastodon.social",
         access_token: str | None = None,
-        lang: str | None = None,
         **options,
     ):
         super().__init__(**options)
         self.instance = instance.replace("https://", "").rstrip("/")
         self.access_token = access_token
-        self.lang = (lang or "").strip().lower() or None
 
     def fetch(self, query: str, limit: int = 50) -> list[Mention]:
         return self.fetch_page(query, limit=limit).mentions
@@ -56,11 +54,6 @@ class MastodonSource(Source):
         for st in statuses:
             acct = st.get("account", {})
             created = _parse(st.get("created_at"))
-            if since and created <= since:
-                continue
-            status_lang = str(st.get("language") or "").strip().lower()
-            if self.lang and status_lang and status_lang != self.lang:
-                continue
             mentions.append(
                 Mention(
                     source=self.name,
