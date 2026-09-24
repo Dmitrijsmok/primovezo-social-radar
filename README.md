@@ -4,7 +4,7 @@
 
 **Self-hosted social listening — hear what the internet says about you, on your own box.**
 
-Track a keyword, brand, or product across Hacker News, Reddit, Mastodon, Bluesky, Stack Overflow, RSS, Threads, X, and YouTube.
+Track a keyword, brand, or product across Hacker News, Reddit, Instagram hashtags, Mastodon, Bluesky, Stack Overflow, RSS, Threads, X, and YouTube.
 Get sentiment and themes in a clean local dashboard. No Harken account, telemetry, or per-seat pricing — the database stays on your machine.
 
 [![CI](https://github.com/Dmitrijsmok/primovezo-social-radar/actions/workflows/ci.yml/badge.svg)](https://github.com/Dmitrijsmok/primovezo-social-radar/actions/workflows/ci.yml)
@@ -130,11 +130,10 @@ uses Bluesky by default, and waits 5 seconds between keywords to reduce burst
 throttling. For the Primovezo runner specifically, transient source failures get at
 least 3 retries; a Bluesky 403 uses a 10s, 20s, 40s exponential backoff. General
 Harken retry defaults remain unchanged. The Primovezo Latvia Radar currently allows
-Bluesky, Threads, X, YouTube, and Mastodon. Bluesky always runs; the keyed sources are
-auto-enabled only when their required credentials are configured. Reddit is intentionally
-excluded, and LinkedIn is not used by this profile. Instagram hashtag discovery is the
-next Meta source planned for this fork; Facebook public-post keyword search is not treated
-as an available Graph API source.
+Bluesky, Threads, X, YouTube, Mastodon, and Instagram hashtag discovery. Bluesky always
+runs; keyed sources are auto-enabled only when their required credentials are configured.
+Reddit is intentionally excluded, and LinkedIn is not used by this profile. Facebook
+public-post keyword search is not treated as an available Graph API source.
 
 ```bash
 harken leads primovezo --sources bluesky,threads
@@ -225,8 +224,8 @@ uv run harken leads primovezo
 ```
 
 The daily Primovezo runner scans both the direct-intent and broader discovery profiles.
-It always scans Bluesky and automatically adds configured Threads, X, YouTube, and
-Mastodon sources.
+It always scans Bluesky and automatically adds configured Threads, X, YouTube, Mastodon,
+and Instagram sources.
 
 Run that command once per day with cron or a systemd timer. In the Primovezo production
 setup, new qualified leads are delivered through Resend to `HARKEN_RESEND_TO`, from
@@ -380,7 +379,8 @@ Only ✅ items are **built today**. 🚧 = on the [roadmap](#roadmap).
 | Theme / topic clustering | ✅ | ✅ |
 | Web dashboard + CLI | ✅ | ✅ (web) |
 | X/Twitter and YouTube | ✅ (BYO key) | ✅ |
-| TikTok and Instagram | 🚧 (BYO access) | ✅ |
+| Instagram hashtag discovery | ✅ (BYO Meta access) | ✅ |
+| TikTok organic discovery | 🚧 | ✅ |
 | Slack / generic webhook alerts | ✅ | ✅ |
 | Email alerts | ✅ | ✅ |
 | Scheduled polling | ✅ | ✅ |
@@ -395,8 +395,9 @@ Only ✅ items are **built today**. 🚧 = on the [roadmap](#roadmap).
 | Hacker News | ✅ | Public Algolia API — no key; service limit is 10,000 requests/hour/IP. |
 | Bluesky | ✅ | Public AT Protocol AppView search — no key. |
 | Stack Overflow | ✅ | Public Stack Exchange question search; Harken preserves API backoff and anonymous quota state. |
-| X / Twitter | needs bearer token | X API v2 recent-post search; requires an X developer plan that includes recent search. |
+| X / Twitter | needs bearer token | X API v2 recent-post search; Primovezo adds `lang:lv` and excludes reposts. |
 | YouTube | needs API key | YouTube Data API v3 video search, ordered by publication time; provider quota applies. |
+| Instagram | needs Meta access | Official hashtag search + recent public media; requires Facebook Login, an Instagram professional account, and hashtag access. |
 | Reddit | needs OAuth | Set a Reddit app client or access token; anonymous JSON search is no longer reliable. |
 | Mastodon | usually needs token | Status full-text search depends on the instance and normally needs a user token. |
 | RSS / Atom | needs feeds | Point it at any feed — a blog, a news site, or a Google Alerts RSS. |
