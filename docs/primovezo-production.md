@@ -136,10 +136,14 @@ itself make a video discoverable.
 
 Use a **long-lived** Threads token. For keyword discovery it needs
 `threads_keyword_search`. For root-post/reply hierarchy in reports it should also have
-`threads_read_replies`. Before every Primovezo daily/recent scan, Harken checks token
-validity and expiry; missing reply-read scope is reported as an operational warning while
-keyword discovery continues. If fewer than 14 days remain, Harken calls the Threads
-refresh endpoint and atomically updates only
+`threads_read_replies`. Meta documents `root_post` and `replied_to` on reply objects,
+but the live API can still return `is_reply=true` while omitting both relation IDs. Harken
+never classifies such an unresolved reply as a standalone lead; it is skipped rather than
+risking a false-positive author/context match. When Meta does return `root_post`, Harken
+normalizes the hit to the root post and includes available conversation replies. Before every
+Primovezo daily/recent scan, Harken checks token validity and expiry; missing reply-read scope
+is reported as an operational warning while keyword discovery continues. If fewer than 14 days
+remain, Harken calls the Threads refresh endpoint and atomically updates only
 `HARKEN_THREADS_ACCESS_TOKEN` in the repository's local `.env`. The current token
 remains in use if a refresh attempt fails while it is still valid, so the next daily
 run can retry.
