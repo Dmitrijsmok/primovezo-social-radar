@@ -222,9 +222,7 @@ def send_lead_digest_resend(settings: ResendSettings, mentions: list[Mention]) -
     count = len(mentions)
     subject = f"[Primovezo Social Radar] {count} new ecommerce lead{'s' if count != 1 else ''}"
     body = _lead_alert_text("daily ecommerce scan", mentions)
-    digest_identity = "|".join(
-        sorted(f"{mention.source}:{mention.id}" for mention in mentions)
-    )
+    digest_identity = "|".join(sorted(f"{mention.source}:{mention.id}" for mention in mentions))
     idempotency_key = (
         "primovezo-lead-digest/"
         + hashlib.sha256(
@@ -256,13 +254,9 @@ def send_lead_digest_resend(settings: ResendSettings, mentions: list[Mention]) -
         )
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        raise ResendDeliveryError(
-            f"Resend returned HTTP {exc.response.status_code}"
-        ) from None
+        raise ResendDeliveryError(f"Resend returned HTTP {exc.response.status_code}") from None
     except httpx.RequestError as exc:
-        raise ResendDeliveryError(
-            f"Resend request failed: {type(exc).__name__}"
-        ) from None
+        raise ResendDeliveryError(f"Resend request failed: {type(exc).__name__}") from None
 
 
 def send_operational_resend(
@@ -334,13 +328,9 @@ def send_operational_resend(
         )
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        raise ResendDeliveryError(
-            f"Resend returned HTTP {exc.response.status_code}"
-        ) from None
+        raise ResendDeliveryError(f"Resend returned HTTP {exc.response.status_code}") from None
     except httpx.RequestError as exc:
-        raise ResendDeliveryError(
-            f"Resend request failed: {type(exc).__name__}"
-        ) from None
+        raise ResendDeliveryError(f"Resend request failed: {type(exc).__name__}") from None
 
 
 def send_threshold_email(settings: EmailSettings, text: str, payload: dict) -> None:
