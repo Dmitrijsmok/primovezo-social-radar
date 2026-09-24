@@ -529,10 +529,15 @@ def _lead_alert_text(query: str, mentions: list[Mention]) -> str:
                     f"  {excerpt}",
                 ]
             )
+            if mention.conversation:
+                lines.append("  Conversation context:")
+                lines.extend(_conversation_text_lines(mention))
+            else:
+                lines.append(f"  {excerpt}")
             if mention.suggested_reply:
                 lines.append(f"  Draft reply (not sent automatically): {mention.suggested_reply}")
         if mention.url:
-            lines.append(f"  Open: {mention.url}")
+            lines.append(f"  Open root/source: {mention.url}")
     if count > 10:
         lines.append(f"…and {count - 10} more")
     return "\n".join(lines)
@@ -555,6 +560,7 @@ def _live_test_text(
         f"Sources: {', '.join(sources) if sources else 'none'}",
         f"Fetched: {fetched}",
         f"Qualified at the configured production threshold: {qualified}",
+        f"Reportable sample after exclusions/context normalization: {len(mentions)}",
     ]
     if issues:
         lines.extend(["", "Operational issues:"])
@@ -564,7 +570,8 @@ def _live_test_text(
         lines.extend(
             [
                 "",
-                "No matching public posts were returned by this live test.",
+                "Live posts were fetched, but none remained in the reportable sample after "
+                "author exclusions/context normalization.",
                 "The source-to-Resend delivery path still completed successfully.",
             ]
         )
@@ -592,13 +599,34 @@ def _live_test_text(
         )
         if mention.lead_reason:
             lines.append(f"  Reason: {mention.lead_reason}")
-        lines.append(f"  {excerpt}")
+        if mention.conversation:
+            lines.append("  Conversation context:")
+            lines.extend(_conversation_text_lines(mention))
+        else:
+            lines.append(f"  {excerpt}")
         if mention.url:
-            lines.append(f"  Open: {mention.url}")
+            lines.append(f"  Open root/source: {mention.url}")
 
     if len(mentions) > 10:
         lines.append(f"…and {len(mentions) - 10} more fetched sample item(s)")
     return "\n".join(lines)
+
+
+def _conversation_text_lines(mention: Mention) -> list[str]:
+    lines: list[str] = []
+    for item in mention.conversation[:30]:
+        depth = max(0, min(item.depth, 8))
+        indent = "  " * depth
+        marker = "ROOT" if depth == 0 else "↳"
+        author = f"@{item.author}" if item.author else "unknown author"
+        matched = " [keyword match]" if item.matched else ""
+        excerpt = " ".join(item.text.split())[:420]
+        lines.append(f"    {indent}{marker} {author}{matched}: {excerpt}")
+        if item.url and (depth == 0 or item.matched):
+            lines.append(f"    {indent}Open: {item.url}")
+    if len(mention.conversation) > 30:
+        lines.append(f"    …and {len(mention.conversation) - 30} more conversation post(s)")
+    return lines
 
 
 def _mention_payload(mention: Mention) -> dict:
