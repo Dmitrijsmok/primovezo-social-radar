@@ -267,6 +267,7 @@ def send_live_test_resend(
     qualified: int,
     sources: list[str],
     issues: list[str] | None = None,
+    excluded_mentions: list[Mention] | None = None,
 ) -> None:
     """Send one clearly marked live-source diagnostic digest through Resend."""
     configured = settings.validated()
@@ -281,6 +282,7 @@ def send_live_test_resend(
         sources=source_names,
         issues=cleaned_issues,
         run_at=run_at,
+        excluded_mentions=excluded_mentions or [],
     )
     identity = (
         configured.sender
@@ -550,6 +552,7 @@ def _live_test_text(
     sources: list[str],
     issues: list[str],
     run_at: datetime,
+    excluded_mentions: list[Mention],
 ) -> str:
     lines = [
         "Primovezo Social Radar live delivery test",
@@ -560,12 +563,19 @@ def _live_test_text(
         f"Fetched: {fetched}",
         f"Qualified at the configured production threshold: {qualified}",
         f"Reportable sample after exclusions/context normalization: {len(mentions)}",
+        f"Excluded diagnostic sample: {len(excluded_mentions)}",
     ]
     if issues:
         lines.extend(["", "Operational issues:"])
         lines.extend(f"- {issue}" for issue in issues[:20])
 
-    if not mentions:
+    if mentions:
+        lines.extend(["", f"Live sample ({min(len(mentions), 10)}):"])
+        for mention in mentions[:10]:
+            lines.extend(_live_sample_lines(mention))
+        if len(mentions) > 10:
+            lines.append(f"…and {len(mentions) - 10} more fetched sample item(s)")
+    else:
         lines.append("")
         if fetched:
             lines.append(
@@ -574,42 +584,75 @@ def _live_test_text(
             )
         else:
             lines.append("No matching public posts were returned by this live test.")
-        lines.append("The source-to-Resend delivery path still completed successfully.")
-        return "\n".join(lines)
 
-    lines.extend(["", f"Live sample ({min(len(mentions), 10)}):"])
-    for mention in mentions[:10]:
-        excerpt = " ".join(mention.content.split())[:500]
-        source = mention.source
-        if mention.author:
-            source += f" · {mention.author}"
-        score = "unavailable" if mention.lead_score is None else f"{mention.lead_score}/100"
-        relevant = (
-            "unclassified"
-            if mention.lead_relevant is None
-            else ("yes" if mention.lead_relevant else "no")
-        )
+    if excluded_mentions:
         lines.extend(
             [
                 "",
-                f"• {source} · query: {mention.query}",
-                f"  AI relevant: {relevant} · score: {score}"
-                + (f" · {mention.lead_category}" if mention.lead_category else ""),
+                f"Excluded diagnostic sample ({min(len(excluded_mentions), 10)}):",
+                "These posts are shown only to verify source/context behavior. "
+                "They remain excluded from production lead classification and delivery.",
             ]
         )
-        if mention.lead_reason:
-            lines.append(f"  Reason: {mention.lead_reason}")
-        if mention.conversation:
-            lines.append("  Conversation context:")
-            lines.extend(_conversation_text_lines(mention))
-        else:
-            lines.append(f"  {excerpt}")
-        if mention.url:
-            lines.append(f"  Open root/source: {mention.url}")
+        for mention in excluded_mentions[:10]:
+            lines.extend(_excluded_live_sample_lines(mention))
+        if len(excluded_mentions) > 10:
+            lines.append(
+                f"…and {len(excluded_mentions) - 10} more excluded diagnostic item(s)"
+            )
 
-    if len(mentions) > 10:
-        lines.append(f"…and {len(mentions) - 10} more fetched sample item(s)")
+    lines.append("")
+    lines.append("The source-to-Resend delivery path completed successfully.")
     return "\n".join(lines)
+
+
+def _live_sample_lines(mention: Mention) -> list[str]:
+    excerpt = " ".join(mention.content.split())[:500]
+    source = mention.source
+    if mention.author:
+        source += f" · {mention.author}"
+    score = "unavailable" if mention.lead_score is None else f"{mention.lead_score}/100"
+    relevant = (
+        "unclassified"
+        if mention.lead_relevant is None
+        else ("yes" if mention.lead_relevant else "no")
+    )
+    lines = [
+        "",
+        f"• {source} · query: {mention.query}",
+        f"  AI relevant: {relevant} · score: {score}"
+        + (f" · {mention.lead_category}" if mention.lead_category else ""),
+    ]
+    if mention.lead_reason:
+        lines.append(f"  Reason: {mention.lead_reason}")
+    if mention.conversation:
+        lines.append("  Conversation context:")
+        lines.extend(_conversation_text_lines(mention))
+    else:
+        lines.append(f"  {excerpt}")
+    if mention.url:
+        lines.append(f"  Open root/source: {mention.url}")
+    return lines
+
+
+def _excluded_live_sample_lines(mention: Mention) -> list[str]:
+    excerpt = " ".join(mention.content.split())[:500]
+    source = mention.source
+    if mention.author:
+        source += f" · {mention.author}"
+    lines = [
+        "",
+        f"• {source} · query: {mention.query}",
+        "  Production exclusion: own/team author",
+    ]
+    if mention.conversation:
+        lines.append("  Conversation context:")
+        lines.extend(_conversation_text_lines(mention))
+    else:
+        lines.append(f"  {excerpt}")
+    if mention.url:
+        lines.append(f"  Open root/source: {mention.url}")
+    return lines
 
 
 def _conversation_text_lines(mention: Mention) -> list[str]:
