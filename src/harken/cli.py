@@ -1334,7 +1334,7 @@ def test_alert(
         None, help="Delivery transport: webhook, email, or resend."
     ),
     kind: str = typer.Option(
-        "negative", help="Synthetic event: negative, lead, volume, or sentiment."
+        "negative", help="Synthetic event: negative, lead, operational, volume, or sentiment."
     ),
 ):
     """Send one synthetic alert to verify webhook, SMTP, or Resend delivery."""
@@ -1347,9 +1347,10 @@ def test_alert(
             "transport must be webhook, email, or resend", param_hint="--transport"
         )
     kind = kind.strip().lower()
-    if kind not in {"negative", "lead", "volume", "sentiment"}:
+    if kind not in {"negative", "lead", "operational", "volume", "sentiment"}:
         raise typer.BadParameter(
-            "kind must be negative, lead, volume, or sentiment", param_hint="--kind"
+            "kind must be negative, lead, operational, volume, or sentiment",
+            param_hint="--kind",
         )
 
     url = webhook_url or cfg.webhook_url
@@ -1369,13 +1370,27 @@ def test_alert(
             "configure HARKEN_RESEND_API_KEY and HARKEN_RESEND_TO",
             param_hint="--transport",
         )
-    if selected == "resend" and kind != "lead":
+    if selected == "resend" and kind not in {"lead", "operational"}:
         raise typer.BadParameter(
-            "Resend test transport currently supports --kind lead",
+            "Resend test transport supports --kind lead or operational",
+            param_hint="--kind",
+        )
+    if kind == "operational" and selected != "resend":
+        raise typer.BadParameter(
+            "--kind operational currently requires --transport resend",
             param_hint="--kind",
         )
     try:
-        if kind in {"negative", "lead"}:
+        if kind == "operational":
+            send_operational_resend(
+                resend_settings,
+                issues=[
+                    "Synthetic operational warning: source fetch failed after retries.",
+                    "This test confirms that failure notifications reach the internal recipient.",
+                ],
+                run_label="synthetic alert test",
+            )
+        elif kind in {"negative", "lead"}:
             if kind == "lead":
                 mention = Mention(
                     source="harken",
