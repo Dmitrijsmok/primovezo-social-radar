@@ -15,6 +15,7 @@ venv/
 *.db
 harken.db
 harken-demo.db
+.primovezo-social-radar.lock
 
 # Env / secrets
 .env
