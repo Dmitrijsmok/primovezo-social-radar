@@ -198,11 +198,30 @@ harken leads reclassify
 
 This updates the stored lead analysis only and does not send a digest by itself.
 
+For a one-off bounded search of recent Latvian Bluesky posts, use:
+
+```bash
+harken leads recent --days 5
+harken logs
+```
+
+The recent scan deliberately uses broader discovery terms such as `Shopify`,
+`WooCommerce`, `Etsy`, `interneta veikals`, and `e-komercija`. The classifier
+keeps both direct commercial leads and useful Latvian ecommerce conversations where a
+light-touch Primovezo mention would be relevant. Primovezo scans Bluesky by default and
+automatically adds Threads whenever `HARKEN_THREADS_ACCESS_TOKEN` is configured.
+Bluesky is filtered with `lang=lv`; Threads results are filtered by the same strict
+Latvian-language classifier. The recent scan does not move the daily incremental
+cursor and does not send email.
+
 A typical daily production flow is simply one scheduled invocation:
 
 ```bash
 uv run harken leads primovezo
 ```
+
+The daily Primovezo runner scans both the direct-intent and broader discovery profiles.
+With a Threads token present it scans Bluesky and Threads automatically.
 
 Run that command once per day with cron or a systemd timer. In the Primovezo production
 setup, new qualified leads are delivered through Resend to `HARKEN_RESEND_TO`, from
@@ -211,9 +230,18 @@ setup, new qualified leads are delivered through Resend to `HARKEN_RESEND_TO`, f
 For the production user-level systemd timer, Resend test, logs, and enable/disable
 commands, see [docs/primovezo-production.md](docs/primovezo-production.md).
 
-Threads uses Meta's official keyword-search API and requires a user access token
-with the `threads_keyword_search` permission. The access token is sent in the
-Authorization header rather than the query string.
+Threads uses Meta's official keyword-search API and requires a long-lived user
+access token with the `threads_keyword_search` permission. Before Primovezo scans,
+Harken checks the token health. When fewer than 14 days remain, it refreshes the
+long-lived token automatically and atomically replaces only
+`HARKEN_THREADS_ACCESS_TOKEN` in the local `.env`. A refresh failure keeps the
+still-valid token in use and is retried on the next scheduled run.
+
+Inspect the connection without printing the token:
+
+```bash
+harken threads status
+```
 
 ### Keep listening
 

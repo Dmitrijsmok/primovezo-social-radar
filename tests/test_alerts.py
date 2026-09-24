@@ -20,6 +20,7 @@ from harken.alerts import (
     send_lead_digest_resend,
     send_negative_alert,
     send_negative_email,
+    send_operational_resend,
     send_threshold_alert,
     send_threshold_email,
     webhook_target_key,
@@ -240,6 +241,39 @@ def test_internal_lead_digest_resend_uses_api_and_idempotency():
     second_key = route.calls[1].request.headers["Idempotency-Key"]
     assert second_key == first_key
     assert resend_target_key(settings).startswith("resend-")
+
+
+@respx.mock
+def test_operational_resend_sends_one_internal_warning_without_secrets():
+    route = respx.post("https://api.resend.com/emails").mock(
+        return_value=httpx.Response(200, json={"id": "email_ops"})
+    )
+    settings = ResendSettings(
+        api_key="re_test_secret",
+        sender="noreply@primovezo.com",
+        recipients=("owner@example.test",),
+    )
+
+    send_operational_resend(
+        settings,
+        issues=[
+            "bluesky fetch failed for 'e-komercija': HTTP 403",
+            "Threads token refresh failed; current valid token kept",
+        ],
+        run_label="daily ecommerce scan",
+    )
+
+    request = route.calls[0].request
+    payload = json.loads(request.content)
+    assert request.headers["Authorization"] == "Bearer re_test_secret"
+    assert request.headers["Idempotency-Key"].startswith("primovezo-ops-warning/")
+    assert payload["subject"] == (
+        "[Primovezo Social Radar] Operational warning: daily ecommerce scan"
+    )
+    assert "bluesky fetch failed" in payload["text"]
+    assert "Threads token refresh failed" in payload["text"]
+    assert "lead scan may be incomplete" in payload["text"]
+    assert "re_test_secret" not in payload["text"]
 
 
 @respx.mock

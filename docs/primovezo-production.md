@@ -19,10 +19,11 @@ addresses there. The runner never emails a social-network author.
 The sending domain must be verified in Resend before using
 `noreply@primovezo.com`.
 
-Verify the exact digest format without scanning social networks:
+Verify the exact digest and operational-warning delivery without scanning social networks:
 
 ```bash
 uv run harken test-alert --transport resend --kind lead
+uv run harken test-alert --transport resend --kind operational
 ```
 
 The Resend request uses an idempotency key derived from the digest contents and
@@ -56,14 +57,57 @@ updates stored lead analysis without fetching social networks or sending a diges
 
 ## 3. Verify a manual scan
 
+Threads is included automatically when this is present in the local `.env`:
+
+```dotenv
+HARKEN_THREADS_ACCESS_TOKEN=<token>
+```
+
+Without that variable, Primovezo continues with Bluesky only and prints that Threads
+is disabled.
+
+Use a **long-lived** Threads token. Before every Primovezo daily/recent scan, Harken
+checks its validity, `threads_keyword_search` scope, and expiry. If fewer than 14 days
+remain, Harken calls the Threads refresh endpoint and atomically updates only
+`HARKEN_THREADS_ACCESS_TOKEN` in the repository's local `.env`. The current token
+remains in use if a refresh attempt fails while it is still valid, so the next daily
+run can retry.
+
+Check token health at any time without exposing the secret:
+
+```bash
+harken threads status
+```
+
 ```bash
 uv run harken leads primovezo --limit 10
-uv run harken leads report
+harken logs
+```
+
+To inspect a bounded recent window without moving the daily cursor or sending email:
+
+```bash
+harken leads recent --days 5
+harken logs
 ```
 
 The scan stores qualified leads even if Resend is not configured. With Resend
 configured, the full scan sends one de-duplicated internal digest only when
 there are new or previously queued qualified leads.
+
+The same internal Resend recipient also receives **one operational warning per
+daily run** when the scan completes only partially, for example after a source
+still fails after retries, the lead classifier fails, or a Threads token refresh
+cannot be completed. Healthy runs do not send an operational email.
+
+The scheduled shell wrapper separately sends a failure alert if the Harken
+process itself exits non-zero or cannot start. The daily process is capped at
+90 minutes by default so a stuck run also becomes a visible failure. This
+fallback notifier reads only the local `.env` and uses Python's standard
+library, so it does not depend on the Harken package or `uv` being healthy.
+
+A local failure notifier cannot report a total server outage or a timer that
+never starts at all. That case requires an external dead-man/heartbeat monitor.
 
 ## 4. Install the daily user timer
 

@@ -28,6 +28,7 @@ from harken.alerts import (
     send_lead_digest_resend,
     send_negative_alert,
     send_negative_email,
+    send_operational_resend,
     send_threshold_alert,
     send_threshold_email,
 )
@@ -37,7 +38,7 @@ from harken.analyze.sentiment import LexiconSentiment
 from harken.auth import ROLES, hash_password, validate_password, validate_role, validate_username
 from harken.config import Config
 from harken.evaluate import evaluate_sentiment, load_sentiment_dataset
-from harken.lead_profiles import PRIMOVEZO_LEAD_KEYWORDS
+from harken.lead_profiles import PRIMOVEZO_DISCOVERY_KEYWORDS, PRIMOVEZO_LEAD_KEYWORDS
 from harken.llm import get_provider
 from harken.models import Mention, Sentiment
 from harken.observability import configure_logging
@@ -45,6 +46,11 @@ from harken.pipeline import Pipeline
 from harken.sample_data import DEMO_QUERY, sample_mentions
 from harken.sources import REGISTRY
 from harken.store import Store
+from harken.threads_auth import (
+    ThreadsAuthError,
+    inspect_threads_token,
+    maintain_threads_token,
+)
 
 app = typer.Typer(
     help="Harken — self-hosted social listening. Hear what the internet says about you.",
@@ -57,10 +63,83 @@ user_app = typer.Typer(help="Manage opt-in local dashboard accounts and roles.")
 app.add_typer(user_app, name="user")
 lead_app = typer.Typer(help="Run focused commercial lead-monitoring profiles.")
 app.add_typer(lead_app, name="leads")
+threads_app = typer.Typer(help="Inspect Threads API connectivity and token health.")
+app.add_typer(threads_app, name="threads")
 console = Console()
 
 
 PRIMOVEZO_ALLOWED_SOURCES = {"bluesky", "threads", "x"}
+
+
+def _prepare_primovezo_threads(cfg: Config) -> str | None:
+    token = cfg.threads_access_token
+    if not token:
+        return None
+
+    try:
+        maintenance = maintain_threads_token(token)
+    except ThreadsAuthError as exc:
+        message = f"Threads token unavailable: {exc}"
+        console.print(f"[yellow]![/yellow] {message}")
+        cfg.threads_access_token = None
+        return message
+
+    cfg.threads_access_token = maintenance.token
+    if maintenance.refreshed:
+        expires = (
+            maintenance.info.expires_at.date().isoformat()
+            if maintenance.info.expires_at
+            else "unknown"
+        )
+        console.print(
+            f"[green]✓[/green] Threads token auto-refreshed; new expiry: {expires}"
+        )
+        return None
+    if maintenance.refresh_error:
+        message = (
+            "Threads token refresh failed; current valid token kept: "
+            f"{maintenance.refresh_error}"
+        )
+        console.print(f"[yellow]![/yellow] {message}")
+        return message
+    return None
+
+
+def _primovezo_auto_sources(cfg: Config) -> list[str]:
+    sources = ["bluesky"]
+    if cfg.threads_access_token:
+        sources.append("threads")
+    return sources
+
+
+@threads_app.command("status")
+def threads_status():
+    """Show Threads token health without exposing the token."""
+    cfg = Config()
+    if not cfg.threads_access_token:
+        console.print("Threads API: not configured")
+        raise typer.Exit(1)
+
+    try:
+        info = inspect_threads_token(cfg.threads_access_token)
+    except ThreadsAuthError as exc:
+        console.print(f"Threads API: unavailable ({exc})")
+        raise typer.Exit(1) from None
+
+    if info.expires_at is None:
+        expiry = "unknown"
+        remaining = "unknown"
+    else:
+        now = datetime.now(timezone.utc)
+        expiry = info.expires_at.isoformat()
+        remaining = f"{max(0, (info.expires_at - now).total_seconds() / 86400):.1f} days"
+
+    keyword = "available" if "threads_keyword_search" in info.scopes else "missing"
+    console.print("Threads API: connected")
+    console.print(f"keyword_search: {keyword}")
+    console.print(f"Token expires: {expiry}")
+    console.print(f"Remaining: {remaining}")
+    console.print("Auto-refresh: enabled when fewer than 14 days remain")
 
 
 def _version(value: bool):
@@ -265,8 +344,11 @@ def watch(
 @lead_app.command("primovezo")
 def leads_primovezo(
     sources: str = typer.Option(
-        "bluesky",
-        help="Comma-separated sources for the profile (default: bluesky).",
+        None,
+        help=(
+            "Comma-separated sources. Default: Bluesky plus Threads when "
+            "HARKEN_THREADS_ACCESS_TOKEN is configured."
+        ),
     ),
     limit: int = typer.Option(50, min=1, max=100, help="Max items per source and keyword."),
     pages: int = typer.Option(
@@ -281,7 +363,20 @@ def leads_primovezo(
     db: str = typer.Option(None, help="Database path (default: harken.db)."),
 ):
     """Scan the built-in Primovezo Latvian commercial-intent keyword profile."""
-    cfg = _tracking_config(sources, limit, db)
+    base_cfg = Config()
+    requested_sources = (
+        {name.strip().lower() for name in sources.split(",") if name.strip()}
+        if sources
+        else None
+    )
+    operational_issues: list[str] = []
+    if requested_sources is None or "threads" in requested_sources:
+        threads_issue = _prepare_primovezo_threads(base_cfg)
+        if threads_issue:
+            operational_issues.append(threads_issue)
+    selected_sources = sources or ",".join(_primovezo_auto_sources(base_cfg))
+    cfg = _tracking_config(selected_sources, limit, db)
+    cfg.threads_access_token = base_cfg.threads_access_token
     disallowed_sources = sorted(set(cfg.sources) - PRIMOVEZO_ALLOWED_SOURCES)
     if disallowed_sources:
         allowed = ", ".join(sorted(PRIMOVEZO_ALLOWED_SOURCES))
@@ -291,6 +386,8 @@ def leads_primovezo(
             param_hint="--sources",
         )
     cfg.lead_enabled = True
+    if "bluesky" in cfg.sources:
+        cfg.bluesky_lang = "lv"
     if cfg.lead_llm_provider.strip().lower() in {"", "none", "null"}:
         raise typer.BadParameter(
             "Primovezo lead scanning requires HARKEN_LEAD_LLM_PROVIDER.",
@@ -332,7 +429,7 @@ def leads_primovezo(
         webhook_url=None,
     )
 
-    keywords = PRIMOVEZO_LEAD_KEYWORDS
+    keywords = (*PRIMOVEZO_LEAD_KEYWORDS, *PRIMOVEZO_DISCOVERY_KEYWORDS)
     console.print(
         Panel.fit(
             f"[bold]Primovezo lead radar[/bold]\n"
@@ -341,6 +438,10 @@ def leads_primovezo(
             border_style="cyan",
         )
     )
+    if "threads" not in cfg.sources and not cfg.threads_access_token:
+        console.print(
+            "[dim]Threads disabled: HARKEN_THREADS_ACCESS_TOKEN is not configured.[/dim]"
+        )
     if digest_resend is None and digest_email is None:
         console.print(
             "[yellow]![/yellow] No internal Resend/SMTP delivery configured; "
@@ -367,11 +468,16 @@ def leads_primovezo(
                 raise
             except Exception as exc:
                 failed_keywords += 1
+                issue = f"scan crashed for {query!r}: {type(exc).__name__}: {exc}"
+                operational_issues.append(issue)
                 rows.append((group, query, 0, 0, 0, f"error: {type(exc).__name__}", 0))
                 console.print(f"  [red]✗[/red] {type(exc).__name__}: {exc}")
             else:
                 for source, err in result.errors.items():
                     console.print(f"  [yellow]![/yellow] {source}: {err}")
+                    operational_issues.append(
+                        f"{source} fetch failed for {query!r}: {err}"
+                    )
                 _print_retries(result)
 
                 source_count = len({name for name in scan_cfg.sources if name.strip()})
@@ -382,6 +488,9 @@ def leads_primovezo(
                     ai_state = "source error"
                 elif result.lead_analysis_error:
                     lead_fallbacks += 1
+                    operational_issues.append(
+                        f"lead classifier failed for {query!r}: {result.lead_analysis_error}"
+                    )
                     console.print(
                         f"  [yellow]![/yellow] lead classifier: {result.lead_analysis_error}"
                     )
@@ -451,6 +560,29 @@ def leads_primovezo(
     finally:
         pipe.close()
 
+    if operational_issues and failed_keywords < len(keywords):
+        if digest_resend is not None:
+            try:
+                send_operational_resend(
+                    digest_resend,
+                    issues=operational_issues,
+                    run_label="daily ecommerce scan",
+                )
+            except Exception as exc:
+                console.print(
+                    "[yellow]![/yellow] operational warning delivery failed: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            else:
+                console.print(
+                    f"[yellow]✉[/yellow] sent one operational warning "
+                    f"for {len(operational_issues)} issue(s)"
+                )
+        else:
+            console.print(
+                "[yellow]![/yellow] operational issue(s) detected, but Resend is not configured"
+            )
+
     table = Table(title="Primovezo lead scan")
     table.add_column("group")
     table.add_column("keyword", style="bold")
@@ -494,6 +626,126 @@ def leads_primovezo(
         raise typer.Exit(1)
 
 
+@lead_app.command("recent")
+def leads_recent(
+    days: int = typer.Option(5, min=1, max=30, help="How many recent days to scan."),
+    limit: int = typer.Option(50, min=1, max=100, help="Results per Bluesky page."),
+    pages: int = typer.Option(
+        1,
+        min=1,
+        max=20,
+        help="Maximum pages per keyword; one 100-result page is safest on public Bluesky search.",
+    ),
+    delay: float = typer.Option(
+        5.0,
+        min=0.0,
+        max=300.0,
+        help="Seconds to wait between keywords to avoid source burst throttling.",
+    ),
+    db: str = typer.Option(None, help="Database path (default: harken.db)."),
+):
+    """Scan a recent Latvian social window without changing the daily cursor or sending email."""
+    base_cfg = Config()
+    _prepare_primovezo_threads(base_cfg)
+    selected_sources = _primovezo_auto_sources(base_cfg)
+    cfg = _tracking_config(",".join(selected_sources), limit, db)
+    cfg.threads_access_token = base_cfg.threads_access_token
+    cfg.lead_enabled = True
+    cfg.lead_fallback_alerts = False
+    cfg.bluesky_lang = "lv"
+    cfg.source_retries = max(cfg.source_retries, 3)
+    cfg.retry_backoff = max(cfg.retry_backoff, 10.0)
+
+    if cfg.lead_llm_provider.strip().lower() in {"", "none", "null"}:
+        raise typer.BadParameter(
+            "Recent Primovezo scanning requires HARKEN_LEAD_LLM_PROVIDER.",
+            param_hint="HARKEN_LEAD_LLM_PROVIDER",
+        )
+    try:
+        provider = get_provider(cfg.lead_llm_provider)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="HARKEN_LEAD_LLM_PROVIDER") from exc
+    if not getattr(provider, "available", False):
+        raise typer.BadParameter(
+            "The configured lead LLM provider has no usable credentials.",
+            param_hint="HARKEN_LEAD_LLM_PROVIDER",
+        )
+
+    scan_cfg = replace(
+        cfg,
+        email_to=[],
+        email_from=None,
+        smtp_host=None,
+        smtp_username=None,
+        smtp_password=None,
+        resend_api_key=None,
+        resend_to=[],
+        webhook_url=None,
+    )
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    console.print(
+        Panel.fit(
+            f"[bold]Primovezo recent scan[/bold]\n"
+            f"last {days} day(s) · Latvian classifier · {', '.join(cfg.sources)} · "
+            f"{len(PRIMOVEZO_DISCOVERY_KEYWORDS)} discovery keywords",
+            border_style="cyan",
+        )
+    )
+    if "threads" not in cfg.sources:
+        console.print(
+            "[dim]Threads disabled: HARKEN_THREADS_ACCESS_TOKEN is not configured.[/dim]"
+        )
+
+    total_fetched = 0
+    total_new = 0
+    total_leads = 0
+    failed_keywords = 0
+    pipe = Pipeline(scan_cfg)
+    try:
+        for index, (group, query) in enumerate(PRIMOVEZO_DISCOVERY_KEYWORDS, start=1):
+            console.print(
+                f"[dim]{index}/{len(PRIMOVEZO_DISCOVERY_KEYWORDS)}[/dim] "
+                f"[bold]{group}[/bold] · “{query}”"
+            )
+            result = pipe.track(
+                query,
+                pages=pages,
+                since_override=cutoff,
+                classify_fetched=True,
+                update_source_state=False,
+            )
+            for source, err in result.errors.items():
+                console.print(f"  [yellow]![/yellow] {source}: {err}")
+            _print_retries(result)
+            if result.errors:
+                failed_keywords += 1
+            if result.lead_analysis_error:
+                console.print(
+                    f"  [yellow]![/yellow] lead classifier: {result.lead_analysis_error}"
+                )
+            console.print(
+                f"  {result.fetched} fetched · {result.new} new · "
+                f"{result.lead_candidates} qualified"
+            )
+            total_fetched += result.fetched
+            total_new += result.new
+            total_leads += result.lead_candidates
+            if index < len(PRIMOVEZO_DISCOVERY_KEYWORDS) and delay:
+                time.sleep(delay)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Recent scan stopped.[/dim]")
+        raise typer.Exit(130) from None
+    finally:
+        pipe.close()
+
+    console.print(
+        f"[green]✓[/green] recent {days}-day scan: {total_fetched} fetched · "
+        f"[bold]{total_new}[/bold] new · {total_leads} qualified match(es) · "
+        f"{failed_keywords} keyword scan failure(s)"
+    )
+    console.print("[dim]No email was sent. Review results with: harken logs[/dim]")
+
+
 @lead_app.command("report")
 def leads_report(
     min_score: int = typer.Option(70, min=0, max=100, help="Minimum lead score to include."),
@@ -501,7 +753,12 @@ def leads_report(
     db: str = typer.Option(None, help="Database path (default: harken.db)."),
 ):
     """Show de-duplicated qualified ecommerce leads across all tracked keywords."""
-    active_queries = [query for _, query in PRIMOVEZO_LEAD_KEYWORDS]
+    active_queries = list(
+        dict.fromkeys(
+            query
+            for _, query in (*PRIMOVEZO_LEAD_KEYWORDS, *PRIMOVEZO_DISCOVERY_KEYWORDS)
+        )
+    )
     with Store(db or Config().db_path) as store:
         leads = store.unique_leads(
             min_score=min_score,
@@ -580,7 +837,7 @@ def leads_reclassify(
     total = 0
     relevant = 0
     with Store(db_path) as store:
-        for _, query in PRIMOVEZO_LEAD_KEYWORDS:
+        for _, query in (*PRIMOVEZO_LEAD_KEYWORDS, *PRIMOVEZO_DISCOVERY_KEYWORDS):
             mentions = store.mentions(query=query, limit=None)
             if not mentions:
                 continue
@@ -1077,7 +1334,7 @@ def test_alert(
         None, help="Delivery transport: webhook, email, or resend."
     ),
     kind: str = typer.Option(
-        "negative", help="Synthetic event: negative, lead, volume, or sentiment."
+        "negative", help="Synthetic event: negative, lead, operational, volume, or sentiment."
     ),
 ):
     """Send one synthetic alert to verify webhook, SMTP, or Resend delivery."""
@@ -1090,9 +1347,10 @@ def test_alert(
             "transport must be webhook, email, or resend", param_hint="--transport"
         )
     kind = kind.strip().lower()
-    if kind not in {"negative", "lead", "volume", "sentiment"}:
+    if kind not in {"negative", "lead", "operational", "volume", "sentiment"}:
         raise typer.BadParameter(
-            "kind must be negative, lead, volume, or sentiment", param_hint="--kind"
+            "kind must be negative, lead, operational, volume, or sentiment",
+            param_hint="--kind",
         )
 
     url = webhook_url or cfg.webhook_url
@@ -1112,13 +1370,27 @@ def test_alert(
             "configure HARKEN_RESEND_API_KEY and HARKEN_RESEND_TO",
             param_hint="--transport",
         )
-    if selected == "resend" and kind != "lead":
+    if selected == "resend" and kind not in {"lead", "operational"}:
         raise typer.BadParameter(
-            "Resend test transport currently supports --kind lead",
+            "Resend test transport supports --kind lead or operational",
+            param_hint="--kind",
+        )
+    if kind == "operational" and selected != "resend":
+        raise typer.BadParameter(
+            "--kind operational currently requires --transport resend",
             param_hint="--kind",
         )
     try:
-        if kind in {"negative", "lead"}:
+        if kind == "operational":
+            send_operational_resend(
+                resend_settings,
+                issues=[
+                    "Synthetic operational warning: source fetch failed after retries.",
+                    "This test confirms that failure notifications reach the internal recipient.",
+                ],
+                run_label="synthetic alert test",
+            )
+        elif kind in {"negative", "lead"}:
             if kind == "lead":
                 mention = Mention(
                     source="harken",

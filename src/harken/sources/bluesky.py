@@ -33,6 +33,9 @@ class BlueskySource(Source):
         since: datetime | None = None,
     ) -> FetchPage:
         params = {"q": query, "limit": min(limit, 100), "sort": "latest"}
+        lang = (self.options.get("lang") or "").strip()
+        if lang:
+            params["lang"] = lang
         if cursor:
             params["cursor"] = cursor
         if since:

@@ -261,6 +261,7 @@ def test_primovezo_lead_runner_requires_llm_provider(tmp_path):
 
 
 def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
+    monkeypatch.delenv("HARKEN_THREADS_ACCESS_TOKEN", raising=False)
     calls = []
     delays = []
     closed = []
@@ -279,6 +280,7 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
                     tuple(self.config.sources),
                     self.config.source_retries,
                     self.config.retry_backoff,
+                    self.config.bluesky_lang,
                 )
             )
             return SimpleNamespace(
@@ -324,20 +326,185 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
     )
 
     assert result.exit_code == 0, result.output
-    assert [query for query, *_ in calls] == [query for _, query in cli.PRIMOVEZO_LEAD_KEYWORDS]
-    assert all(pages == 2 for _, pages, _, _, _, _, _ in calls)
-    assert all(lead_enabled for _, _, lead_enabled, _, _, _, _ in calls)
-    assert all(not fallback for _, _, _, fallback, _, _, _ in calls)
-    assert all(sources == ("bluesky",) for _, _, _, _, sources, _, _ in calls)
-    assert all(retries == 3 for _, _, _, _, _, retries, _ in calls)
-    assert all(backoff == 10.0 for _, _, _, _, _, _, backoff in calls)
-    assert delays == [0.25] * (len(cli.PRIMOVEZO_LEAD_KEYWORDS) - 1)
+    expected_queries = [
+        query
+        for _, query in (*cli.PRIMOVEZO_LEAD_KEYWORDS, *cli.PRIMOVEZO_DISCOVERY_KEYWORDS)
+    ]
+    assert [query for query, *_ in calls] == expected_queries
+    assert all(pages == 2 for _, pages, _, _, _, _, _, _ in calls)
+    assert all(lead_enabled for _, _, lead_enabled, _, _, _, _, _ in calls)
+    assert all(not fallback for _, _, _, fallback, _, _, _, _ in calls)
+    assert all(sources == ("bluesky",) for _, _, _, _, sources, _, _, _ in calls)
+    assert all(retries == 3 for _, _, _, _, _, retries, _, _ in calls)
+    assert all(backoff == 10.0 for _, _, _, _, _, _, backoff, _ in calls)
+    assert all(lang == "lv" for _, _, _, _, _, _, _, lang in calls)
+    assert delays == [0.25] * (len(expected_queries) - 1)
     assert closed == [True]
     assert "Primovezo lead scan" in result.output
-    expected = len(cli.PRIMOVEZO_LEAD_KEYWORDS)
+    expected = len(cli.PRIMOVEZO_LEAD_KEYWORDS) + len(cli.PRIMOVEZO_DISCOVERY_KEYWORDS)
     assert f"{expected * 2} fetched" in result.output
     assert f"{expected} qualified match(es)" in result.output
     assert all(group == "ecommerce" for group, _ in cli.PRIMOVEZO_LEAD_KEYWORDS)
+
+
+def test_primovezo_recent_scans_bounded_window_without_delivery(tmp_path, monkeypatch):
+    monkeypatch.delenv("HARKEN_THREADS_ACCESS_TOKEN", raising=False)
+    calls = []
+
+    class FakePipeline:
+        def __init__(self, config):
+            self.config = config
+            assert config.sources == ["bluesky"]
+            assert config.bluesky_lang == "lv"
+            assert config.email_to == []
+            assert config.resend_api_key is None
+            assert config.resend_to == []
+            assert config.webhook_url is None
+
+        def track(self, query, **kwargs):
+            calls.append((query, kwargs))
+            return SimpleNamespace(
+                errors={},
+                retry_counts={},
+                lead_analysis_error=None,
+                lead_candidates=0,
+                lead_candidate_mentions=[],
+                fetched=1,
+                new=1,
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "leads",
+            "recent",
+            "--days",
+            "5",
+            "--pages",
+            "4",
+            "--delay",
+            "0",
+            "--db",
+            str(tmp_path / "recent.db"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(calls) == len(cli.PRIMOVEZO_DISCOVERY_KEYWORDS)
+    assert all(kwargs["pages"] == 4 for _, kwargs in calls)
+    assert all(kwargs["classify_fetched"] is True for _, kwargs in calls)
+    assert all(kwargs["update_source_state"] is False for _, kwargs in calls)
+    assert all(kwargs["since_override"] is not None for _, kwargs in calls)
+    assert "recent 5-day scan" in result.output
+    assert "No email was sent" in result.output
+
+
+def test_primovezo_auto_enables_threads_when_token_is_configured(tmp_path, monkeypatch):
+    seen = []
+
+    class FakePipeline:
+        def __init__(self, config):
+            seen.append((tuple(config.sources), config.threads_access_token))
+
+        def track(self, query, pages=3):
+            return SimpleNamespace(
+                errors={},
+                retry_counts={},
+                lead_analysis_error=None,
+                lead_candidates=0,
+                lead_candidate_mentions=[],
+                fetched=0,
+                new=0,
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-token")
+    monkeypatch.setattr(cli, "_prepare_primovezo_threads", lambda cfg: None)
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
+
+    result = runner.invoke(
+        cli.app,
+        ["leads", "primovezo", "--delay", "0", "--db", str(tmp_path / "auto.db")],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen == [(("bluesky", "threads"), "threads-token")]
+
+
+def test_primovezo_recent_auto_enables_threads_when_token_is_configured(
+    tmp_path, monkeypatch
+):
+    seen = []
+
+    class FakePipeline:
+        def __init__(self, config):
+            seen.append((tuple(config.sources), config.threads_access_token))
+
+        def track(self, query, **kwargs):
+            return SimpleNamespace(
+                errors={},
+                retry_counts={},
+                lead_analysis_error=None,
+                lead_candidates=0,
+                lead_candidate_mentions=[],
+                fetched=0,
+                new=0,
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-token")
+    monkeypatch.setattr(cli, "_prepare_primovezo_threads", lambda cfg: None)
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
+
+    result = runner.invoke(
+        cli.app,
+        ["leads", "recent", "--days", "5", "--delay", "0", "--db", str(tmp_path / "recent.db")],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen == [(("bluesky", "threads"), "threads-token")]
+
+
+def test_threads_status_reports_health_without_token_value(monkeypatch):
+    from harken.threads_auth import ThreadsTokenInfo
+
+    secret = "never-print-this-token"
+    monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", secret)
+    monkeypatch.setattr(
+        cli,
+        "inspect_threads_token",
+        lambda token: ThreadsTokenInfo(
+            valid=True,
+            scopes=("threads_basic", "threads_keyword_search"),
+            expires_at=datetime(2026, 11, 23, tzinfo=timezone.utc),
+        ),
+    )
+
+    result = runner.invoke(cli.app, ["threads", "status"])
+
+    assert result.exit_code == 0, result.output
+    assert "Threads API: connected" in result.output
+    assert "keyword_search: available" in result.output
+    assert "Auto-refresh: enabled" in result.output
+    assert secret not in result.output
 
 
 def test_primovezo_runner_rejects_reddit(monkeypatch):
@@ -353,6 +520,75 @@ def test_primovezo_runner_rejects_reddit(monkeypatch):
     assert result.exit_code != 0
     assert "does not use: reddit" in result.output
     assert "bluesky, threads, x" in result.output
+
+
+def test_primovezo_runner_sends_one_operational_warning_for_partial_failures(
+    tmp_path, monkeypatch
+):
+    warnings = []
+    calls = []
+
+    class FakeStore:
+        def enqueue_alerts(self, *args, **kwargs):
+            return None
+
+        def pending_alerts_for_target(self, *args, **kwargs):
+            return []
+
+    class FakePipeline:
+        def __init__(self, config):
+            self.store = FakeStore()
+
+        def track(self, query, pages=3):
+            calls.append(query)
+            errors = {"bluesky": "HTTPStatusError: HTTP 403"} if len(calls) == 1 else {}
+            return SimpleNamespace(
+                errors=errors,
+                retry_counts={"bluesky": 3} if errors else {},
+                lead_analysis_error=None,
+                lead_candidates=0,
+                lead_candidate_mentions=[],
+                fetched=0,
+                new=0,
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("HARKEN_RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("HARKEN_RESEND_FROM", "noreply@primovezo.com")
+    monkeypatch.setenv("HARKEN_RESEND_TO", "owner@example.test")
+    monkeypatch.delenv("HARKEN_THREADS_ACCESS_TOKEN", raising=False)
+    monkeypatch.setattr(
+        cli,
+        "_prepare_primovezo_threads",
+        lambda cfg: "Threads token refresh failed; current valid token kept",
+    )
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
+    monkeypatch.setattr(
+        cli,
+        "send_operational_resend",
+        lambda settings, *, issues, run_label: warnings.append(
+            (settings, list(issues), run_label)
+        ),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["leads", "primovezo", "--delay", "0", "--db", str(tmp_path / "ops.db")],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(warnings) == 1
+    settings, issues, run_label = warnings[0]
+    assert settings.recipients == ("owner@example.test",)
+    assert run_label == "daily ecommerce scan"
+    assert any("Threads token refresh failed" in issue for issue in issues)
+    assert any("bluesky fetch failed" in issue for issue in issues)
+    assert "sent one operational warning" in result.output
 
 
 def test_primovezo_runner_sends_one_internal_digest(tmp_path, monkeypatch):
@@ -629,6 +865,32 @@ def test_alert_command_can_send_synthetic_lead_with_resend(monkeypatch):
     assert settings.sender == "noreply@primovezo.com"
     assert settings.recipients == ("owner@example.test",)
     assert mentions[0].lead_score == 92
+    assert "resend test delivered" in result.output
+
+
+def test_alert_command_can_send_synthetic_operational_warning_with_resend(monkeypatch):
+    monkeypatch.setenv("HARKEN_RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("HARKEN_RESEND_FROM", "noreply@primovezo.com")
+    monkeypatch.setenv("HARKEN_RESEND_TO", "owner@example.test")
+    delivered = []
+    monkeypatch.setattr(
+        cli,
+        "send_operational_resend",
+        lambda settings, *, issues, run_label: delivered.append(
+            (settings, list(issues), run_label)
+        ),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["test-alert", "--transport", "resend", "--kind", "operational"],
+    )
+
+    assert result.exit_code == 0, result.output
+    settings, issues, run_label = delivered[0]
+    assert settings.recipients == ("owner@example.test",)
+    assert run_label == "synthetic alert test"
+    assert any("Synthetic operational warning" in issue for issue in issues)
     assert "resend test delivered" in result.output
 
 
