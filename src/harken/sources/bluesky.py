@@ -13,8 +13,8 @@ from harken.models import Mention
 from harken.sources.base import FetchPage, Source
 
 _APIS = (
-    "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts",
     "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts",
+    "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts",
 )
 
 
