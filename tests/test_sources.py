@@ -683,7 +683,9 @@ def test_threads_keyword_search_falls_back_when_relation_fields_are_rejected():
     mention = ThreadsSource(access_token="token").fetch("Shopify")[0]
 
     assert route.call_count == 2
-    assert route.calls[0].request.url.params["fields"] != route.calls[1].request.url.params["fields"]
+    assert (
+        route.calls[0].request.url.params["fields"] != route.calls[1].request.url.params["fields"]
+    )
     assert mention.author == "alice"
     assert mention.conversation == []
 
