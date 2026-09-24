@@ -15,15 +15,9 @@ class XSource(Source):
     label = "X / Twitter"
     needs_config = True
 
-    def __init__(
-        self,
-        bearer_token: str | None = None,
-        lang: str | None = None,
-        **options,
-    ):
+    def __init__(self, bearer_token: str | None = None, **options):
         super().__init__(**options)
         self.bearer_token = bearer_token
-        self.lang = (lang or "").strip() or None
 
     def fetch(self, query: str, limit: int = 50) -> list[Mention]:
         return self.fetch_page(query, limit=limit).mentions
@@ -41,12 +35,8 @@ class XSource(Source):
 
         # X requires 10 <= max_results <= 100. We request its minimum and trim
         # locally when a caller asks for fewer than ten rows.
-        search_query = query
-        if self.lang:
-            search_query = f"({query}) lang:{self.lang} -is:retweet"
-
         params = {
-            "query": search_query,
+            "query": query,
             "max_results": max(10, min(limit, 100)),
             "tweet.fields": "created_at,public_metrics,author_id",
             "expansions": "author_id",
