@@ -135,6 +135,16 @@ The scan stores qualified leads even if Resend is not configured. With Resend
 configured, the full scan sends one de-duplicated internal digest only when
 there are new or previously queued qualified leads.
 
+Exclude Primovezo/team-owned social accounts from lead classification and email delivery:
+
+```dotenv
+HARKEN_LEAD_EXCLUDED_AUTHORS=dmitry.mokeyev
+```
+
+Excluded authors are still fetched and stored for source visibility, but they are not sent to
+the lead classifier and never become lead candidates. Add additional owned handles as a
+comma-separated list.
+
 The same internal Resend recipient also receives **one operational warning per
 daily run** when the scan completes only partially, for example after a source
 still fails after retries, the lead classifier fails, or a Threads token refresh
