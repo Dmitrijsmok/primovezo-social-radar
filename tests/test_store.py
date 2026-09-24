@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from harken.models import Mention, Sentiment
+from harken.models import ConversationPost, Mention, Sentiment
 from harken.store import Store
 
 
@@ -244,6 +244,53 @@ def test_pending_alerts_for_target_collects_cross_keyword_leads_once(tmp_path):
     assert len(pending) == 1
     assert pending[0].id == first.id
     assert pending[0].lead_score == 90
+    db.close()
+
+
+def test_lead_conversation_survives_durable_alert_retry(tmp_path):
+    db = Store(tmp_path / "conversation-outbox.db")
+    mention = mk(
+        "Kuru platformu izvēlēties?",
+        source="threads",
+        query="Shopify",
+        url="https://threads.test/root",
+    )
+    mention.lead_relevant = True
+    mention.lead_score = 92
+    mention.lead_category = "conversation"
+    mention.lead_reason = "Platformas izvēles diskusija"
+    mention.conversation = [
+        ConversationPost(
+            id="root",
+            author="prospect",
+            text="Kuru platformu izvēlēties interneta veikalam?",
+            url="https://threads.test/root",
+            created_at=datetime(2026, 9, 24, 8, 0, tzinfo=timezone.utc),
+            depth=0,
+        ),
+        ConversationPost(
+            id="reply",
+            author="dmitry.mokeyev",
+            text="Man Shopify nepatīk.",
+            url="https://threads.test/reply",
+            created_at=datetime(2026, 9, 24, 9, 0, tzinfo=timezone.utc),
+            reply_to_id="root",
+            depth=1,
+            matched=True,
+        ),
+    ]
+    db.upsert([mention])
+    db.save_lead_analysis([mention])
+    db.enqueue_alerts([mention], "lead-email-test")
+
+    pending = db.pending_alerts_for_target("lead-email-test")
+
+    assert len(pending) == 1
+    assert [item.author for item in pending[0].conversation] == [
+        "prospect",
+        "dmitry.mokeyev",
+    ]
+    assert pending[0].conversation[1].matched is True
     db.close()
 
 
