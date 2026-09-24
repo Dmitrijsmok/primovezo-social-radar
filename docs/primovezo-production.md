@@ -63,8 +63,22 @@ Threads is included automatically when this is present in the local `.env`:
 HARKEN_THREADS_ACCESS_TOKEN=<token>
 ```
 
-Without that variable, Primovezo continues with Bluesky only and prints that Threads
-is disabled.
+Without that variable, Threads stays disabled. Primovezo always keeps Bluesky
+enabled and also auto-enables X, YouTube, or Mastodon when their corresponding
+credentials are present:
+
+```dotenv
+HARKEN_X_BEARER_TOKEN=<x-bearer-token>
+HARKEN_YOUTUBE_API_KEY=<youtube-api-key>
+HARKEN_MASTODON_ACCESS_TOKEN=<mastodon-user-token>
+HARKEN_MASTODON_INSTANCE=mastodon.social
+```
+
+For the Primovezo profile, X is restricted with `lang:lv` and reposts are excluded.
+YouTube requests use `relevanceLanguage=lv` and `regionCode=LV`; Google documents
+those as relevance/viewability hints, so the strict Latvian classifier still decides
+whether a result can qualify. Mastodon search coverage depends on the selected instance's
+search backend and indexable public statuses.
 
 Use a **long-lived** Threads token. Before every Primovezo daily/recent scan, Harken
 checks its validity, `threads_keyword_search` scope, and expiry. If fewer than 14 days
