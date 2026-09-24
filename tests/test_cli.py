@@ -552,6 +552,30 @@ def test_primovezo_auto_enables_configured_additional_social_sources(
     ]
 
 
+def test_primovezo_source_status_shows_configured_sources_without_secrets(monkeypatch):
+    monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-secret")
+    monkeypatch.setenv("HARKEN_X_BEARER_TOKEN", "x-secret")
+    monkeypatch.setenv("HARKEN_YOUTUBE_API_KEY", "youtube-secret")
+    monkeypatch.setenv("HARKEN_MASTODON_ACCESS_TOKEN", "mastodon-secret")
+    monkeypatch.setenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", "instagram-secret")
+    monkeypatch.setenv("HARKEN_INSTAGRAM_USER_ID", "ig-user-id")
+
+    result = runner.invoke(cli.app, ["leads", "source-status"])
+
+    assert result.exit_code == 0, result.output
+    for source in ("bluesky", "threads", "x", "youtube", "mastodon", "instagram"):
+        assert source in result.output
+    assert result.output.count("enabled") >= 6
+    for secret in (
+        "threads-secret",
+        "x-secret",
+        "youtube-secret",
+        "mastodon-secret",
+        "instagram-secret",
+    ):
+        assert secret not in result.output
+
+
 def test_threads_status_reports_health_without_token_value(monkeypatch):
     from harken.threads_auth import ThreadsTokenInfo
 
