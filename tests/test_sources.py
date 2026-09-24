@@ -132,7 +132,7 @@ def test_bluesky_parses_posts():
             }
         ]
     }
-    respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+    respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
         return_value=httpx.Response(200, json=payload)
     )
     out = BlueskySource().fetch("acme")
@@ -142,11 +142,11 @@ def test_bluesky_parses_posts():
 
 
 @respx.mock
-def test_bluesky_fails_over_to_public_appview_on_forbidden():
-    primary = respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+def test_bluesky_fails_over_to_api_appview_on_forbidden():
+    primary = respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
         return_value=httpx.Response(403)
     )
-    fallback = respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+    fallback = respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -174,10 +174,10 @@ def test_bluesky_fails_over_to_public_appview_on_forbidden():
 
 @respx.mock
 def test_bluesky_raises_when_both_appviews_forbid_search():
-    respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+    respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
         return_value=httpx.Response(403)
     )
-    respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+    respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
         return_value=httpx.Response(403)
     )
 
@@ -187,7 +187,7 @@ def test_bluesky_raises_when_both_appviews_forbid_search():
 
 @respx.mock
 def test_bluesky_page_preserves_api_cursor_and_since_boundary():
-    route = respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+    route = respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
         return_value=httpx.Response(200, json={"posts": [], "cursor": "next-page"})
     )
     since = datetime(2026, 6, 1, tzinfo=timezone.utc)
@@ -200,7 +200,7 @@ def test_bluesky_page_preserves_api_cursor_and_since_boundary():
 
 @respx.mock
 def test_bluesky_can_filter_by_language():
-    route = respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+    route = respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
         return_value=httpx.Response(200, json={"posts": []})
     )
     BlueskySource(lang="lv").fetch("Shopify alternatīva", limit=100)
