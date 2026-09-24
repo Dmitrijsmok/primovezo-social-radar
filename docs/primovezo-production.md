@@ -64,7 +64,7 @@ HARKEN_THREADS_ACCESS_TOKEN=<token>
 ```
 
 Without that variable, Threads stays disabled. Primovezo always keeps Bluesky
-enabled and also auto-enables X, YouTube, or Mastodon when their corresponding
+enabled and also auto-enables X, YouTube, Mastodon, or Instagram when their corresponding
 credentials are present:
 
 ```dotenv
@@ -72,13 +72,18 @@ HARKEN_X_BEARER_TOKEN=<x-bearer-token>
 HARKEN_YOUTUBE_API_KEY=<youtube-api-key>
 HARKEN_MASTODON_ACCESS_TOKEN=<mastodon-user-token>
 HARKEN_MASTODON_INSTANCE=mastodon.social
+HARKEN_INSTAGRAM_ACCESS_TOKEN=<instagram-user-token>
+HARKEN_INSTAGRAM_USER_ID=<instagram-professional-user-id>
 ```
 
 For the Primovezo profile, X is restricted with `lang:lv` and reposts are excluded.
 YouTube requests use `relevanceLanguage=lv` and `regionCode=LV`; Google documents
 those as relevance/viewability hints, so the strict Latvian classifier still decides
 whether a result can qualify. Mastodon search coverage depends on the selected instance's
-search backend and indexable public statuses.
+search backend and indexable public statuses. Instagram uses Meta's hashtag-search surface,
+normalizing each radar phrase into a hashtag candidate and then reading recent public media.
+Meta limits hashtag discovery and requires Facebook Login with a professional Instagram account,
+so Instagram remains disabled until both its access token and IG user id are configured.
 
 Use a **long-lived** Threads token. Before every Primovezo daily/recent scan, Harken
 checks its validity, `threads_keyword_search` scope, and expiry. If fewer than 14 days
