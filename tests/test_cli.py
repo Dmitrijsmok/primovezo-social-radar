@@ -433,9 +433,8 @@ def test_primovezo_auto_enables_threads_when_token_is_configured(tmp_path, monke
     monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
     monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-token")
     monkeypatch.delenv("HARKEN_X_BEARER_TOKEN", raising=False)
-    monkeypatch.delenv("HARKEN_YOUTUBE_API_KEY", raising=False)
-    monkeypatch.delenv("HARKEN_MASTODON_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("HARKEN_TIKTOK_APIFY_TOKEN", raising=False)
     monkeypatch.delenv("HARKEN_INSTAGRAM_USER_ID", raising=False)
     monkeypatch.setattr(cli, "_prepare_primovezo_threads", lambda cfg: None)
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
@@ -477,9 +476,8 @@ def test_primovezo_recent_auto_enables_threads_when_token_is_configured(
     monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
     monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-token")
     monkeypatch.delenv("HARKEN_X_BEARER_TOKEN", raising=False)
-    monkeypatch.delenv("HARKEN_YOUTUBE_API_KEY", raising=False)
-    monkeypatch.delenv("HARKEN_MASTODON_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("HARKEN_TIKTOK_APIFY_TOKEN", raising=False)
     monkeypatch.delenv("HARKEN_INSTAGRAM_USER_ID", raising=False)
     monkeypatch.setattr(cli, "_prepare_primovezo_threads", lambda cfg: None)
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
@@ -501,15 +499,7 @@ def test_primovezo_auto_enables_configured_additional_social_sources(
 
     class FakePipeline:
         def __init__(self, config):
-            seen.append(
-                (
-                    tuple(config.sources),
-                    config.x_lang,
-                    config.youtube_relevance_language,
-                    config.youtube_region_code,
-                    config.mastodon_lang,
-                )
-            )
+            seen.append((tuple(config.sources), config.x_lang))
 
         def track(self, query, pages=3):
             return SimpleNamespace(
@@ -529,10 +519,9 @@ def test_primovezo_auto_enables_configured_additional_social_sources(
     monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
     monkeypatch.delenv("HARKEN_THREADS_ACCESS_TOKEN", raising=False)
     monkeypatch.setenv("HARKEN_X_BEARER_TOKEN", "x-token")
-    monkeypatch.setenv("HARKEN_YOUTUBE_API_KEY", "youtube-key")
-    monkeypatch.setenv("HARKEN_MASTODON_ACCESS_TOKEN", "mastodon-token")
     monkeypatch.setenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", "instagram-token")
     monkeypatch.setenv("HARKEN_INSTAGRAM_USER_ID", "ig-user-id")
+    monkeypatch.setenv("HARKEN_TIKTOK_APIFY_TOKEN", "apify-token")
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
     monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
 
@@ -542,37 +531,32 @@ def test_primovezo_auto_enables_configured_additional_social_sources(
     )
 
     assert result.exit_code == 0, result.output
-    assert seen == [
-        (
-            ("bluesky", "x", "youtube", "mastodon", "instagram"),
-            "lv",
-            "lv",
-            "LV",
-            "lv",
-        )
-    ]
+    # TikTok is present only on the discovery pipeline; the direct-intent
+    # pipeline omits it to keep paid scraping focused and cheap.
+    assert (("bluesky", "x", "instagram", "tiktok"), "lv") in seen
+    assert (("bluesky", "x", "instagram"), "lv") in seen
 
 
 def test_primovezo_source_status_shows_configured_sources_without_secrets(monkeypatch):
     monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-secret")
     monkeypatch.setenv("HARKEN_X_BEARER_TOKEN", "x-secret")
-    monkeypatch.setenv("HARKEN_YOUTUBE_API_KEY", "youtube-secret")
-    monkeypatch.setenv("HARKEN_MASTODON_ACCESS_TOKEN", "mastodon-secret")
     monkeypatch.setenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", "instagram-secret")
     monkeypatch.setenv("HARKEN_INSTAGRAM_USER_ID", "ig-user-id")
+    monkeypatch.setenv("HARKEN_TIKTOK_APIFY_TOKEN", "apify-secret")
 
     result = runner.invoke(cli.app, ["leads", "source-status"])
 
     assert result.exit_code == 0, result.output
-    for source in ("bluesky", "threads", "x", "youtube", "mastodon", "instagram"):
+    for source in ("bluesky", "threads", "x", "instagram", "tiktok"):
         assert source in result.output
-    assert result.output.count("enabled") >= 6
+    assert "youtube" not in result.output
+    assert "mastodon" not in result.output
+    assert result.output.count("enabled") >= 5
     for secret in (
         "threads-secret",
         "x-secret",
-        "youtube-secret",
-        "mastodon-secret",
         "instagram-secret",
+        "apify-secret",
     ):
         assert secret not in result.output
 
@@ -613,7 +597,7 @@ def test_primovezo_runner_rejects_reddit(monkeypatch):
 
     assert result.exit_code != 0
     assert "does not use: reddit" in result.output
-    assert "bluesky, instagram, mastodon, threads, x, youtube" in result.output
+    assert "bluesky, instagram, threads, tiktok, x" in result.output
 
 
 def test_primovezo_runner_sends_one_operational_warning_for_partial_failures(
