@@ -2,9 +2,6 @@ name: CI
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feat/primovezo-more-sources
 
 jobs:
   test:
