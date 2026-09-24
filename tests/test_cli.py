@@ -150,6 +150,7 @@ def test_sources_lists_registry():
     assert result.exit_code == 0
     assert "hackernews" in result.output
     assert "reddit" in result.output
+    assert "instagram" in result.output
 
 
 def test_project_cli_create_add_report_remove_and_delete(tmp_path):
