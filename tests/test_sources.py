@@ -582,6 +582,7 @@ def test_threads_keyword_search_falls_back_when_relation_fields_are_rejected():
             ),
         ]
     )
+    respx.get("https://graph.threads.net/th-plain").mock(return_value=httpx.Response(403))
 
     mention = ThreadsSource(access_token="token").fetch("Shopify")[0]
 
