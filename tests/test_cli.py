@@ -546,13 +546,21 @@ def test_live_email_test_uses_isolated_db_and_real_classification(monkeypatch):
                 return []
             return [
                 Mention(
+                    source="threads",
+                    query=query,
+                    author="dmitry.mokeyev",
+                    text="Mans paša ieraksts par interneta veikaliem",
+                    url="https://threads.test/own",
+                    created_at=datetime(2026, 9, 24, tzinfo=timezone.utc),
+                ),
+                Mention(
                     source="bluesky",
                     query=query,
                     author="shop.bsky.social",
                     text="Meklēju risinājumu interneta veikalam",
                     url="https://bsky.app/profile/shop/post/1",
                     created_at=datetime(2026, 9, 24, tzinfo=timezone.utc),
-                )
+                ),
             ]
 
         def lead_analysis(self, query, mention_id):
@@ -577,7 +585,7 @@ def test_live_email_test_uses_isolated_db_and_real_classification(monkeypatch):
             candidates = []
             fetched = 0
             if query == "interneta veikals":
-                fetched = 1
+                fetched = 2
                 candidates = [
                     Mention(
                         source="bluesky",
@@ -608,6 +616,7 @@ def test_live_email_test_uses_isolated_db_and_real_classification(monkeypatch):
 
     monkeypatch.setenv("HARKEN_RESEND_API_KEY", "re_live_test")
     monkeypatch.setenv("HARKEN_RESEND_TO", "owner@example.test")
+    monkeypatch.setenv("HARKEN_LEAD_EXCLUDED_AUTHORS", "dmitry.mokeyev")
     monkeypatch.delenv("HARKEN_THREADS_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("HARKEN_INSTAGRAM_USER_ID", raising=False)
@@ -630,11 +639,12 @@ def test_live_email_test_uses_isolated_db_and_real_classification(monkeypatch):
     assert config.db_path != "harken.db"
     assert not Path(config.db_path).exists()
 
-    assert sent["fetched"] == 1
+    assert sent["fetched"] == 2
     assert sent["qualified"] == 1
     assert sent["sources"] == ["bluesky"]
     assert sent["issues"] == []
     assert len(sent["mentions"]) == 1
+    assert sent["mentions"][0].author == "shop.bsky.social"
     assert sent["mentions"][0].lead_relevant is True
     assert sent["mentions"][0].lead_score == 91
     assert "live test email delivered" in result.output
