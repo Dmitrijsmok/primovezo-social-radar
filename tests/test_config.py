@@ -132,6 +132,7 @@ def test_keyed_source_credentials_are_loaded_and_routed(monkeypatch):
         "region_code": "LV",
     }
 
+
 def test_email_delivery_settings_are_loaded(monkeypatch):
     monkeypatch.setenv("HARKEN_EMAIL_TO", "ops@example.test, owner@example.test")
     monkeypatch.setenv("HARKEN_EMAIL_FROM", "harken@example.test")
