@@ -161,9 +161,7 @@ class Config:
         default_factory=lambda: (os.getenv("HARKEN_BLUESKY_APP_PASSWORD") or "").strip() or None
     )
     bluesky_pds: str | None = field(
-        default_factory=lambda: (
-            (os.getenv("HARKEN_BLUESKY_PDS") or "").strip().rstrip("/") or None
-        )
+        default_factory=lambda: (os.getenv("HARKEN_BLUESKY_PDS") or "").strip().rstrip("/") or None
     )
     instagram_access_token: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_INSTAGRAM_ACCESS_TOKEN") or None
