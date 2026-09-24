@@ -8,6 +8,7 @@ import respx
 
 from harken.sources.bluesky import BlueskySource
 from harken.sources.hackernews import HackerNewsSource
+from harken.sources.mastodon import MastodonSource
 from harken.sources.reddit import RedditSource
 from harken.sources.stackoverflow import StackOverflowSource
 from harken.sources.threads import ThreadsSource
@@ -283,6 +284,21 @@ def test_youtube_parses_video_search_and_pagination():
 
 
 @respx.mock
+def test_youtube_can_bias_results_to_latvia_and_latvian():
+    route = respx.get("https://www.googleapis.com/youtube/v3/search").mock(
+        return_value=httpx.Response(200, json={"items": []})
+    )
+    YouTubeSource(
+        api_key="secret-key",
+        relevance_language="lv",
+        region_code="lv",
+    ).fetch("Shopify", limit=10)
+    params = route.calls[0].request.url.params
+    assert params["relevanceLanguage"] == "lv"
+    assert params["regionCode"] == "LV"
+
+
+@respx.mock
 def test_threads_parses_keyword_search_and_pagination():
     route = respx.get("https://graph.threads.net/keyword_search").mock(
         return_value=httpx.Response(
@@ -361,6 +377,63 @@ def test_x_parses_posts_authors_metrics_and_pagination():
     assert page.mentions[0].author == "alice"
     assert page.mentions[0].score == 17
     assert page.mentions[0].url == "https://x.com/alice/status/123"
+
+
+@respx.mock
+def test_x_can_filter_primovezo_searches_to_latvian_and_exclude_reposts():
+    route = respx.get("https://api.x.com/2/tweets/search/recent").mock(
+        return_value=httpx.Response(200, json={"data": [], "meta": {}})
+    )
+    XSource(bearer_token="token", lang="lv").fetch("Shopify alternatīva")
+    assert route.calls[0].request.url.params["query"] == (
+        "(Shopify alternatīva) lang:lv -is:retweet"
+    )
+
+
+@respx.mock
+def test_mastodon_filters_recent_results_by_language_and_window():
+    route = respx.get("https://mastodon.social/api/v2/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "statuses": [
+                    {
+                        "id": "new-lv",
+                        "created_at": "2026-09-23T10:00:00Z",
+                        "language": "lv",
+                        "content": "<p>Shopify alternatīva</p>",
+                        "url": "https://mastodon.social/@alice/1",
+                        "account": {"acct": "alice"},
+                    },
+                    {
+                        "id": "new-en",
+                        "created_at": "2026-09-23T11:00:00Z",
+                        "language": "en",
+                        "content": "<p>Shopify alternative</p>",
+                        "url": "https://mastodon.social/@bob/2",
+                        "account": {"acct": "bob"},
+                    },
+                    {
+                        "id": "old-lv",
+                        "created_at": "2026-09-18T10:00:00Z",
+                        "language": "lv",
+                        "content": "<p>Vecs ieraksts</p>",
+                        "url": "https://mastodon.social/@carol/3",
+                        "account": {"acct": "carol"},
+                    },
+                ]
+            },
+        )
+    )
+    since = datetime(2026, 9, 20, tzinfo=timezone.utc)
+    page = MastodonSource(
+        instance="mastodon.social",
+        access_token="mastodon-token",
+        lang="lv",
+    ).fetch_page("Shopify", since=since)
+    request = route.calls[0].request
+    assert request.headers["authorization"] == "Bearer mastodon-token"
+    assert [mention.author for mention in page.mentions] == ["alice"]
 
 
 @pytest.mark.parametrize(
