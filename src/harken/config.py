@@ -186,6 +186,24 @@ class Config:
     youtube_api_key: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_YOUTUBE_API_KEY") or None
     )
+    tiktok_apify_token: str | None = field(
+        default_factory=lambda: os.getenv("HARKEN_TIKTOK_APIFY_TOKEN") or None
+    )
+    tiktok_apify_actor: str = field(
+        default_factory=lambda: (
+            os.getenv("HARKEN_TIKTOK_APIFY_ACTOR") or "clockworks~tiktok-scraper"
+        ).strip()
+        or "clockworks~tiktok-scraper"
+    )
+    tiktok_proxy_country: str = field(
+        default_factory=lambda: (
+            os.getenv("HARKEN_TIKTOK_PROXY_COUNTRY") or "LV"
+        ).strip().upper()
+        or "LV"
+    )
+    tiktok_max_results: int = field(
+        default_factory=lambda: _positive_env_int("HARKEN_TIKTOK_MAX_RESULTS", 15)
+    )
     threads_access_token: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_THREADS_ACCESS_TOKEN") or None
     )
@@ -310,6 +328,13 @@ class Config:
             }
         if name == "youtube":
             return {"api_key": self.youtube_api_key}
+        if name == "tiktok":
+            return {
+                "apify_token": self.tiktok_apify_token,
+                "actor": self.tiktok_apify_actor,
+                "proxy_country": self.tiktok_proxy_country,
+                "max_results": self.tiktok_max_results,
+            }
         if name == "threads":
             return {"access_token": self.threads_access_token}
         return {}
