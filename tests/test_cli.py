@@ -337,7 +337,7 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
     assert all(retries == 3 for _, _, _, _, _, retries, _, _ in calls)
     assert all(backoff == 10.0 for _, _, _, _, _, _, backoff, _ in calls)
     assert all(lang == "lv" for _, _, _, _, _, _, _, lang in calls)
-    assert delays == [0.25] * (len(cli.PRIMOVEZO_LEAD_KEYWORDS) - 1)
+    assert delays == [0.25] * (len(expected_queries) - 1)
     assert closed == [True]
     assert "Primovezo lead scan" in result.output
     expected = len(cli.PRIMOVEZO_LEAD_KEYWORDS) + len(cli.PRIMOVEZO_DISCOVERY_KEYWORDS)
@@ -429,6 +429,7 @@ def test_primovezo_auto_enables_threads_when_token_is_configured(tmp_path, monke
     monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
     monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
     monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-token")
+    monkeypatch.setattr(cli, "_prepare_primovezo_threads", lambda cfg: None)
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
     monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
 
@@ -467,6 +468,7 @@ def test_primovezo_recent_auto_enables_threads_when_token_is_configured(
     monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
     monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
     monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-token")
+    monkeypatch.setattr(cli, "_prepare_primovezo_threads", lambda cfg: None)
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
     monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
 
@@ -477,6 +479,30 @@ def test_primovezo_recent_auto_enables_threads_when_token_is_configured(
 
     assert result.exit_code == 0, result.output
     assert seen == [(("bluesky", "threads"), "threads-token")]
+
+
+def test_threads_status_reports_health_without_token_value(monkeypatch):
+    from harken.threads_auth import ThreadsTokenInfo
+
+    secret = "never-print-this-token"
+    monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", secret)
+    monkeypatch.setattr(
+        cli,
+        "inspect_threads_token",
+        lambda token: ThreadsTokenInfo(
+            valid=True,
+            scopes=("threads_basic", "threads_keyword_search"),
+            expires_at=datetime(2026, 11, 23, tzinfo=timezone.utc),
+        ),
+    )
+
+    result = runner.invoke(cli.app, ["threads", "status"])
+
+    assert result.exit_code == 0, result.output
+    assert "Threads API: connected" in result.output
+    assert "keyword_search: available" in result.output
+    assert "Auto-refresh: enabled" in result.output
+    assert secret not in result.output
 
 
 def test_primovezo_runner_rejects_reddit(monkeypatch):
