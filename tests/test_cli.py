@@ -261,6 +261,7 @@ def test_primovezo_lead_runner_requires_llm_provider(tmp_path):
 
 
 def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
+    monkeypatch.delenv("HARKEN_THREADS_ACCESS_TOKEN", raising=False)
     calls = []
     delays = []
     closed = []
@@ -347,6 +348,7 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
 
 
 def test_primovezo_recent_scans_bounded_window_without_delivery(tmp_path, monkeypatch):
+    monkeypatch.delenv("HARKEN_THREADS_ACCESS_TOKEN", raising=False)
     calls = []
 
     class FakePipeline:
