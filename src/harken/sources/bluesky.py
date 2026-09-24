@@ -151,8 +151,11 @@ class BlueskySource(Source):
             ) from None
 
         if response.status_code != 200:
+            detail = _safe_error_detail(response)
+            suffix = f": {detail}" if detail else ""
             raise RuntimeError(
-                f"Bluesky authenticated fallback login failed with HTTP {response.status_code}"
+                f"Bluesky authenticated fallback login failed with HTTP "
+                f"{response.status_code}{suffix}"
             )
 
         try:
@@ -178,6 +181,24 @@ class BlueskySource(Source):
             raise RuntimeError(
                 f"Bluesky authenticated proxy search failed: {type(exc).__name__}"
             ) from None
+
+
+def _safe_error_detail(response: httpx.Response) -> str | None:
+    """Return only provider error metadata, never request credentials/tokens."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    message = payload.get("message")
+    parts = [
+        str(value).strip().replace("\n", " ")[:160]
+        for value in (error, message)
+        if isinstance(value, str) and value.strip()
+    ]
+    return " · ".join(parts) or None
 
 
 def _parse(s: str | None) -> datetime:
