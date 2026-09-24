@@ -7,6 +7,7 @@ live source. `_serve` (which blocks on uvicorn.run) is stubbed out.
 import csv
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -532,6 +533,112 @@ def test_primovezo_only_auto_enables_free_official_sources(tmp_path, monkeypatch
     # Paid X access and non-commercial TikTok Research credentials must never
     # silently turn into Primovezo commercial lead sources.
     assert seen == [("bluesky", "instagram")]
+
+
+def test_live_email_test_uses_isolated_db_and_real_classification(monkeypatch):
+    seen_configs = []
+    calls = []
+    sent = {}
+
+    class FakeStore:
+        def mentions(self, query=None, limit=None):
+            if query != "interneta veikals":
+                return []
+            return [
+                Mention(
+                    source="bluesky",
+                    query=query,
+                    author="shop.bsky.social",
+                    text="Meklēju risinājumu interneta veikalam",
+                    url="https://bsky.app/profile/shop/post/1",
+                    created_at=datetime(2026, 9, 24, tzinfo=timezone.utc),
+                )
+            ]
+
+        def lead_analysis(self, query, mention_id):
+            if query != "interneta veikals":
+                return None
+            return {
+                "relevant": True,
+                "score": 91,
+                "category": "ecommerce",
+                "reason": "Konkrēta interese par e-komercijas risinājumu.",
+                "suggested_reply": "Varam salīdzināt pieejas.",
+                "analyzed_at": "2026-09-24T08:00:00+00:00",
+            }
+
+    class FakePipeline:
+        def __init__(self, config):
+            seen_configs.append(config)
+            self.store = FakeStore()
+
+        def track(self, query, **kwargs):
+            calls.append((query, kwargs))
+            candidates = []
+            fetched = 0
+            if query == "interneta veikals":
+                fetched = 1
+                candidates = [
+                    Mention(
+                        source="bluesky",
+                        query=query,
+                        author="shop.bsky.social",
+                        text="Meklēju risinājumu interneta veikalam",
+                        url="https://bsky.app/profile/shop/post/1",
+                        created_at=datetime(2026, 9, 24, tzinfo=timezone.utc),
+                        lead_relevant=True,
+                        lead_score=91,
+                        lead_category="ecommerce",
+                    )
+                ]
+            return SimpleNamespace(
+                fetched=fetched,
+                errors={},
+                lead_analysis_error=None,
+                lead_candidate_mentions=candidates,
+            )
+
+        def close(self):
+            pass
+
+    def fake_send(settings, mentions, **kwargs):
+        sent["settings"] = settings
+        sent["mentions"] = mentions
+        sent.update(kwargs)
+
+    monkeypatch.setenv("HARKEN_RESEND_API_KEY", "re_live_test")
+    monkeypatch.setenv("HARKEN_RESEND_TO", "owner@example.test")
+    monkeypatch.delenv("HARKEN_THREADS_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("HARKEN_INSTAGRAM_USER_ID", raising=False)
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli, "send_live_test_resend", fake_send)
+
+    result = runner.invoke(cli.app, ["leads", "live-email-test", "--limit", "3", "--days", "2"])
+
+    assert result.exit_code == 0, result.output
+    assert len(calls) == len(cli.PRIMOVEZO_LIVE_TEST_QUERIES)
+    assert all(kwargs["pages"] == 1 for _, kwargs in calls)
+    assert all(kwargs["classify_fetched"] is True for _, kwargs in calls)
+    assert all(kwargs["update_source_state"] is False for _, kwargs in calls)
+    assert len(seen_configs) == 1
+    config = seen_configs[0]
+    assert config.sources == ["bluesky"]
+    assert config.email_to == []
+    assert config.resend_api_key is None
+    assert config.webhook_url is None
+    assert config.db_path != "harken.db"
+    assert not Path(config.db_path).exists()
+
+    assert sent["fetched"] == 1
+    assert sent["qualified"] == 1
+    assert sent["sources"] == ["bluesky"]
+    assert sent["issues"] == []
+    assert len(sent["mentions"]) == 1
+    assert sent["mentions"][0].lead_relevant is True
+    assert sent["mentions"][0].lead_score == 91
+    assert "live test email delivered" in result.output
+    assert "Production harken.db and source cursors were not modified" in result.output
 
 
 def test_primovezo_source_status_shows_only_lead_sources_without_secrets(monkeypatch):
