@@ -86,6 +86,12 @@ class BlueskySource(Source):
         return FetchPage(mentions, data.get("cursor"))
 
     def _search(self, params: dict) -> dict:
+        # Production operators can configure a dedicated app password to avoid
+        # datacenter/CDN blocks entirely. When present, use the authenticated
+        # PDS proxy directly instead of probing public AppView hosts first.
+        if self.identifier and self.app_password:
+            return self._authenticated_search(params)
+
         last_response: httpx.Response | None = None
         with self._client() as client:
             for endpoint in _PUBLIC_APIS:
@@ -95,14 +101,11 @@ class BlueskySource(Source):
                     response.raise_for_status()
                     return response.json()
 
-        if self.identifier and self.app_password:
-            return self._authenticated_search(params)
-
         if last_response is not None and last_response.status_code in {401, 403}:
             raise RuntimeError(
                 "Bluesky public search is blocked from this host; configure "
                 "HARKEN_BLUESKY_IDENTIFIER and HARKEN_BLUESKY_APP_PASSWORD "
-                "for authenticated PDS-proxy fallback"
+                "for authenticated PDS-proxy access"
             )
         if last_response is not None:
             last_response.raise_for_status()
@@ -124,6 +127,11 @@ class BlueskySource(Source):
             self._session_cache[cache_key] = token
             response = self._proxy_search(params, token)
 
+        if response.status_code in {401, 403}:
+            raise RuntimeError(
+                "Bluesky authenticated PDS proxy denied search; check the configured "
+                "account, app password, and PDS"
+            )
         response.raise_for_status()
         return response.json()
 
