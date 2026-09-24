@@ -154,6 +154,18 @@ class Config:
     bluesky_lang: str | None = field(
         default_factory=lambda: (os.getenv("HARKEN_BLUESKY_LANG") or "").strip() or None
     )
+    bluesky_identifier: str | None = field(
+        default_factory=lambda: (os.getenv("HARKEN_BLUESKY_IDENTIFIER") or "").strip() or None
+    )
+    bluesky_app_password: str | None = field(
+        default_factory=lambda: (os.getenv("HARKEN_BLUESKY_APP_PASSWORD") or "").strip() or None
+    )
+    bluesky_pds: str = field(
+        default_factory=lambda: (
+            (os.getenv("HARKEN_BLUESKY_PDS") or "https://bsky.social").strip().rstrip("/")
+            or "https://bsky.social"
+        )
+    )
     instagram_access_token: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_INSTAGRAM_ACCESS_TOKEN") or None
     )
@@ -279,6 +291,10 @@ class Config:
             raise ValueError("HARKEN_SMTP_USERNAME and HARKEN_SMTP_PASSWORD must be set together")
         if bool(self.resend_api_key) != bool(self.resend_to):
             raise ValueError("HARKEN_RESEND_API_KEY and HARKEN_RESEND_TO must be set together")
+        if bool(self.bluesky_identifier) != bool(self.bluesky_app_password):
+            raise ValueError(
+                "HARKEN_BLUESKY_IDENTIFIER and HARKEN_BLUESKY_APP_PASSWORD must be set together"
+            )
         if bool(self.auth_username) != bool(self.auth_password):
             raise ValueError("HARKEN_AUTH_USERNAME and HARKEN_AUTH_PASSWORD must be set together")
         if self.auth_mode == "basic" and not (self.auth_username and self.auth_password):
@@ -303,7 +319,12 @@ class Config:
 
     def source_options(self, name: str) -> dict:
         if name == "bluesky":
-            return {"lang": self.bluesky_lang}
+            return {
+                "lang": self.bluesky_lang,
+                "identifier": self.bluesky_identifier,
+                "app_password": self.bluesky_app_password,
+                "pds": self.bluesky_pds,
+            }
         if name == "instagram":
             return {
                 "access_token": self.instagram_access_token,
