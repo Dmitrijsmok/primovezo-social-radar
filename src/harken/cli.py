@@ -171,6 +171,52 @@ def threads_status():
     console.print("Auto-refresh: enabled when fewer than 14 days remain")
 
 
+@lead_app.command("source-status")
+def primovezo_source_status():
+    """Show which Primovezo social sources are configured without exposing secrets."""
+    cfg = Config()
+    enabled = set(_primovezo_auto_sources(cfg))
+    table = Table(title="Primovezo social sources")
+    table.add_column("source", style="bold")
+    table.add_column("status")
+    table.add_column("notes")
+
+    rows = [
+        ("bluesky", True, "public search · lang=lv"),
+        (
+            "threads",
+            bool(cfg.threads_access_token),
+            "keyword search · strict Latvian classifier",
+        ),
+        (
+            "x",
+            bool(cfg.x_bearer_token),
+            "recent search · lang:lv · reposts excluded",
+        ),
+        (
+            "youtube",
+            bool(cfg.youtube_api_key),
+            "video search · relevanceLanguage=lv · regionCode=LV",
+        ),
+        (
+            "mastodon",
+            bool(cfg.mastodon_access_token),
+            f"{cfg.mastodon_instance} · instance-dependent full-text search",
+        ),
+        (
+            "instagram",
+            bool(cfg.instagram_access_token and cfg.instagram_user_id),
+            "public hashtag recent media",
+        ),
+    ]
+    for source, configured, notes in rows:
+        status = "[green]enabled[/green]" if source in enabled and configured else "[dim]disabled[/dim]"
+        if source == "bluesky":
+            status = "[green]enabled[/green]"
+        table.add_row(source, status, notes)
+    console.print(table)
+
+
 def _version(value: bool):
     if value:
         console.print(f"harken {__version__}")
