@@ -130,10 +130,11 @@ uses Bluesky by default, and waits 5 seconds between keywords to reduce burst
 throttling. For the Primovezo runner specifically, transient source failures get at
 least 3 retries; a Bluesky 403 uses a 10s, 20s, 40s exponential backoff. General
 Harken retry defaults remain unchanged. The Primovezo Latvia Radar currently allows
-Bluesky, Threads, X, YouTube, Mastodon, and Instagram hashtag discovery. Bluesky always
-runs; keyed sources are auto-enabled only when their required credentials are configured.
-Reddit is intentionally excluded, and LinkedIn is not used by this profile. Facebook
-public-post keyword search is not treated as an available Graph API source.
+Bluesky, Threads, X, Instagram hashtag discovery, and optional TikTok organic keyword
+discovery. Bluesky always runs; keyed sources are auto-enabled only when their required
+credentials are configured. Reddit, Mastodon, YouTube, and LinkedIn are intentionally
+outside the Primovezo lead-radar profile. Facebook public-post keyword search is not
+treated as an available Graph API source.
 
 ```bash
 harken leads primovezo --sources bluesky,threads
@@ -225,8 +226,9 @@ uv run harken leads primovezo
 ```
 
 The daily Primovezo runner scans both the direct-intent and broader discovery profiles.
-It always scans Bluesky and automatically adds configured Threads, X, YouTube, Mastodon,
-and Instagram sources.
+It always scans Bluesky and automatically adds configured Threads, X, Instagram, and
+TikTok sources. TikTok is intentionally limited to the broader discovery keyword set,
+rather than the longer direct-intent phrases, to keep paid scraping focused.
 
 Run that command once per day with cron or a systemd timer. In the Primovezo production
 setup, new qualified leads are delivered through Resend to `HARKEN_RESEND_TO`, from
@@ -381,7 +383,7 @@ Only ✅ items are **built today**. 🚧 = on the [roadmap](#roadmap).
 | Web dashboard + CLI | ✅ | ✅ (web) |
 | X/Twitter and YouTube | ✅ (BYO key) | ✅ |
 | Instagram hashtag discovery | ✅ (BYO Meta access) | ✅ |
-| TikTok organic discovery | 🚧 | ✅ |
+| TikTok organic discovery | ✅ (BYO Apify token) | ✅ |
 | Slack / generic webhook alerts | ✅ | ✅ |
 | Email alerts | ✅ | ✅ |
 | Scheduled polling | ✅ | ✅ |
