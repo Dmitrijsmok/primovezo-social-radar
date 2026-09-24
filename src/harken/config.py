@@ -168,9 +168,6 @@ class Config:
     mastodon_access_token: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_MASTODON_ACCESS_TOKEN") or None
     )
-    mastodon_lang: str | None = field(
-        default_factory=lambda: (os.getenv("HARKEN_MASTODON_LANG") or "").strip() or None
-    )
     reddit_client_id: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_REDDIT_CLIENT_ID") or None
     )
@@ -188,14 +185,6 @@ class Config:
     )
     youtube_api_key: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_YOUTUBE_API_KEY") or None
-    )
-    youtube_relevance_language: str | None = field(
-        default_factory=lambda: (os.getenv("HARKEN_YOUTUBE_RELEVANCE_LANGUAGE") or "").strip()
-        or None
-    )
-    youtube_region_code: str | None = field(
-        default_factory=lambda: (os.getenv("HARKEN_YOUTUBE_REGION_CODE") or "").strip().upper()
-        or None
     )
     threads_access_token: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_THREADS_ACCESS_TOKEN") or None
@@ -305,7 +294,6 @@ class Config:
             return {
                 "instance": self.mastodon_instance,
                 "access_token": self.mastodon_access_token,
-                "lang": self.mastodon_lang,
             }
         if name == "reddit":
             return {
@@ -321,11 +309,7 @@ class Config:
                 "lang": self.x_lang,
             }
         if name == "youtube":
-            return {
-                "api_key": self.youtube_api_key,
-                "relevance_language": self.youtube_relevance_language,
-                "region_code": self.youtube_region_code,
-            }
+            return {"api_key": self.youtube_api_key}
         if name == "threads":
             return {"access_token": self.threads_access_token}
         return {}
