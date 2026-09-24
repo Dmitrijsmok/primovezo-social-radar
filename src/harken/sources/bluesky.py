@@ -1,7 +1,8 @@
-"""Bluesky source via the public AT Protocol search endpoint — no auth needed.
+"""Bluesky source via the public AT Protocol search endpoints.
 
-Uses the public ``app.bsky.feed.searchPosts`` XRPC endpoint on the bsky.app
-public API host, which serves results without a session for reasonable use.
+``app.bsky.feed.searchPosts`` can be served by multiple Bluesky AppView hosts.
+Some datacenter egresses receive 401/403 from one host while the other remains
+available, so the adapter fails over before surfacing an error to the pipeline.
 """
 
 from __future__ import annotations
@@ -11,9 +12,10 @@ from datetime import datetime, timezone
 from harken.models import Mention
 from harken.sources.base import FetchPage, Source
 
-# The legacy public.api host is blocked by Bluesky's CDN in some regions. The
-# official AppView host exposes the same public XRPC endpoint without a session.
-_API = "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts"
+_APIS = (
+    "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts",
+    "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts",
+)
 
 
 class BlueskySource(Source):
@@ -41,9 +43,18 @@ class BlueskySource(Source):
         if since:
             params["since"] = since.isoformat().replace("+00:00", "Z")
         with self._client() as client:
-            resp = client.get(_API, params=params)
-            resp.raise_for_status()
-            data = resp.json()
+            last_response = None
+            for endpoint in _APIS:
+                resp = client.get(endpoint, params=params)
+                last_response = resp
+                if resp.status_code not in {401, 403}:
+                    resp.raise_for_status()
+                    data = resp.json()
+                    break
+            else:
+                assert last_response is not None
+                last_response.raise_for_status()
+                raise RuntimeError("Bluesky search failed without a response")
 
         mentions: list[Mention] = []
         for post in data.get("posts", []):
