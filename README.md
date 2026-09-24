@@ -130,8 +130,11 @@ uses Bluesky by default, and waits 5 seconds between keywords to reduce burst
 throttling. For the Primovezo runner specifically, transient source failures get at
 least 3 retries; a Bluesky 403 uses a 10s, 20s, 40s exponential backoff. General
 Harken retry defaults remain unchanged. The Primovezo Latvia Radar currently allows
-only Bluesky, Threads, and X. Reddit is intentionally excluded, and LinkedIn is not
-used by this profile. Facebook and Instagram are target sources for a future adapter.
+Bluesky, Threads, X, YouTube, and Mastodon. Bluesky always runs; the keyed sources are
+auto-enabled only when their required credentials are configured. Reddit is intentionally
+excluded, and LinkedIn is not used by this profile. Instagram hashtag discovery is the
+next Meta source planned for this fork; Facebook public-post keyword search is not treated
+as an available Graph API source.
 
 ```bash
 harken leads primovezo --sources bluesky,threads
@@ -208,11 +211,12 @@ harken logs
 The recent scan deliberately uses broader discovery terms such as `Shopify`,
 `WooCommerce`, `Etsy`, `interneta veikals`, and `e-komercija`. The classifier
 keeps both direct commercial leads and useful Latvian ecommerce conversations where a
-light-touch Primovezo mention would be relevant. Primovezo scans Bluesky by default and
-automatically adds Threads whenever `HARKEN_THREADS_ACCESS_TOKEN` is configured.
-Bluesky is filtered with `lang=lv`; Threads results are filtered by the same strict
-Latvian-language classifier. The recent scan does not move the daily incremental
-cursor and does not send email.
+light-touch Primovezo mention would be relevant. Primovezo scans Bluesky by default and automatically adds Threads, X, YouTube, and
+Mastodon when their credentials are configured. Bluesky and X are filtered toward
+Latvian at the provider level, YouTube is biased to Latvian content viewable in Latvia,
+and Mastodon is locally filtered to Latvian where the status exposes a language tag.
+Every source still passes through the same strict original-Latvian classifier. The
+recent scan does not move the daily incremental cursor and does not send email.
 
 A typical daily production flow is simply one scheduled invocation:
 
@@ -221,7 +225,8 @@ uv run harken leads primovezo
 ```
 
 The daily Primovezo runner scans both the direct-intent and broader discovery profiles.
-With a Threads token present it scans Bluesky and Threads automatically.
+It always scans Bluesky and automatically adds configured Threads, X, YouTube, and
+Mastodon sources.
 
 Run that command once per day with cron or a systemd timer. In the Primovezo production
 setup, new qualified leads are delivered through Resend to `HARKEN_RESEND_TO`, from
