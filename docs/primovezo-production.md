@@ -105,9 +105,12 @@ requests captions, engagement metadata, and available `voice_to_text`. TikTok's 
 condition searches the video description, so spoken text enriches analysis but does not by
 itself make a video discoverable.
 
-Use a **long-lived** Threads token. Before every Primovezo daily/recent scan, Harken
-checks its validity, `threads_keyword_search` scope, and expiry. If fewer than 14 days
-remain, Harken calls the Threads refresh endpoint and atomically updates only
+Use a **long-lived** Threads token. For keyword discovery it needs
+`threads_keyword_search`. For root-post/reply hierarchy in reports it should also have
+`threads_read_replies`. Before every Primovezo daily/recent scan, Harken checks token
+validity and expiry; missing reply-read scope is reported as an operational warning while
+keyword discovery continues. If fewer than 14 days remain, Harken calls the Threads
+refresh endpoint and atomically updates only
 `HARKEN_THREADS_ACCESS_TOKEN` in the repository's local `.env`. The current token
 remains in use if a refresh attempt fails while it is still valid, so the next daily
 run can retry.
