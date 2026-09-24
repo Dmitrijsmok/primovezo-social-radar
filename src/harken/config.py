@@ -180,9 +180,6 @@ class Config:
     x_bearer_token: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_X_BEARER_TOKEN") or None
     )
-    x_lang: str | None = field(
-        default_factory=lambda: (os.getenv("HARKEN_X_LANG") or "").strip() or None
-    )
     youtube_api_key: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_YOUTUBE_API_KEY") or None
     )
@@ -316,10 +313,7 @@ class Config:
         if name == "rss":
             return {"feeds": self.rss_feeds}
         if name == "x":
-            return {
-                "bearer_token": self.x_bearer_token,
-                "lang": self.x_lang,
-            }
+            return {"bearer_token": self.x_bearer_token}
         if name == "youtube":
             return {"api_key": self.youtube_api_key}
         if name == "tiktok":
