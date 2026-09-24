@@ -522,6 +522,75 @@ def test_primovezo_runner_rejects_reddit(monkeypatch):
     assert "bluesky, threads, x" in result.output
 
 
+def test_primovezo_runner_sends_one_operational_warning_for_partial_failures(
+    tmp_path, monkeypatch
+):
+    warnings = []
+    calls = []
+
+    class FakeStore:
+        def enqueue_alerts(self, *args, **kwargs):
+            return None
+
+        def pending_alerts_for_target(self, *args, **kwargs):
+            return []
+
+    class FakePipeline:
+        def __init__(self, config):
+            self.store = FakeStore()
+
+        def track(self, query, pages=3):
+            calls.append(query)
+            errors = {"bluesky": "HTTPStatusError: HTTP 403"} if len(calls) == 1 else {}
+            return SimpleNamespace(
+                errors=errors,
+                retry_counts={"bluesky": 3} if errors else {},
+                lead_analysis_error=None,
+                lead_candidates=0,
+                lead_candidate_mentions=[],
+                fetched=0,
+                new=0,
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("HARKEN_RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("HARKEN_RESEND_FROM", "noreply@primovezo.com")
+    monkeypatch.setenv("HARKEN_RESEND_TO", "owner@example.test")
+    monkeypatch.delenv("HARKEN_THREADS_ACCESS_TOKEN", raising=False)
+    monkeypatch.setattr(
+        cli,
+        "_prepare_primovezo_threads",
+        lambda cfg: "Threads token refresh failed; current valid token kept",
+    )
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
+    monkeypatch.setattr(
+        cli,
+        "send_operational_resend",
+        lambda settings, *, issues, run_label: warnings.append(
+            (settings, list(issues), run_label)
+        ),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["leads", "primovezo", "--delay", "0", "--db", str(tmp_path / "ops.db")],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(warnings) == 1
+    settings, issues, run_label = warnings[0]
+    assert settings.recipients == ("owner@example.test",)
+    assert run_label == "daily ecommerce scan"
+    assert any("Threads token refresh failed" in issue for issue in issues)
+    assert any("bluesky fetch failed" in issue for issue in issues)
+    assert "sent one operational warning" in result.output
+
+
 def test_primovezo_runner_sends_one_internal_digest(tmp_path, monkeypatch):
     db_path = tmp_path / "digest.db"
     lead = Mention(
