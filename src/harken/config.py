@@ -191,9 +191,8 @@ class Config:
     )
     tiktok_region_code: str = field(
         default_factory=lambda: (
-            os.getenv("HARKEN_TIKTOK_REGION_CODE") or "LV"
-        ).strip().upper()
-        or "LV"
+            (os.getenv("HARKEN_TIKTOK_REGION_CODE") or "LV").strip().upper() or "LV"
+        )
     )
     threads_access_token: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_THREADS_ACCESS_TOKEN") or None
@@ -219,10 +218,10 @@ class Config:
         default_factory=lambda: os.getenv("HARKEN_RESEND_API_KEY") or None
     )
     resend_from: str = field(
-        default_factory=lambda: os.getenv(
-            "HARKEN_RESEND_FROM", "noreply@primovezo.com"
-        ).strip()
-        or "noreply@primovezo.com"
+        default_factory=lambda: (
+            os.getenv("HARKEN_RESEND_FROM", "noreply@primovezo.com").strip()
+            or "noreply@primovezo.com"
+        )
     )
     resend_to: list[str] = field(default_factory=lambda: _env_list("HARKEN_RESEND_TO"))
     alert_window_hours: int = field(
@@ -276,9 +275,7 @@ class Config:
         if bool(self.smtp_username) != bool(self.smtp_password):
             raise ValueError("HARKEN_SMTP_USERNAME and HARKEN_SMTP_PASSWORD must be set together")
         if bool(self.resend_api_key) != bool(self.resend_to):
-            raise ValueError(
-                "HARKEN_RESEND_API_KEY and HARKEN_RESEND_TO must be set together"
-            )
+            raise ValueError("HARKEN_RESEND_API_KEY and HARKEN_RESEND_TO must be set together")
         if bool(self.auth_username) != bool(self.auth_password):
             raise ValueError("HARKEN_AUTH_USERNAME and HARKEN_AUTH_PASSWORD must be set together")
         if self.auth_mode == "basic" and not (self.auth_username and self.auth_password):
