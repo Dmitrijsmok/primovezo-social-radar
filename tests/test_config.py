@@ -104,33 +104,36 @@ def test_keyed_source_credentials_are_loaded_and_routed(monkeypatch):
     monkeypatch.setenv("HARKEN_X_BEARER_TOKEN", "x-token")
     monkeypatch.setenv("HARKEN_X_LANG", "lv")
     monkeypatch.setenv("HARKEN_YOUTUBE_API_KEY", "youtube-key")
-    monkeypatch.setenv("HARKEN_YOUTUBE_RELEVANCE_LANGUAGE", "lv")
-    monkeypatch.setenv("HARKEN_YOUTUBE_REGION_CODE", "lv")
     monkeypatch.setenv("HARKEN_MASTODON_INSTANCE", "mastodon.social")
     monkeypatch.setenv("HARKEN_MASTODON_ACCESS_TOKEN", "mastodon-token")
-    monkeypatch.setenv("HARKEN_MASTODON_LANG", "lv")
     monkeypatch.setenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", "instagram-token")
     monkeypatch.setenv("HARKEN_INSTAGRAM_USER_ID", "ig-user-id")
     monkeypatch.setenv("HARKEN_INSTAGRAM_GRAPH_BASE", "https://graph.facebook.com/v99.0")
+    monkeypatch.setenv("HARKEN_TIKTOK_APIFY_TOKEN", "apify-token")
+    monkeypatch.setenv("HARKEN_TIKTOK_APIFY_ACTOR", "clockworks~tiktok-scraper")
+    monkeypatch.setenv("HARKEN_TIKTOK_PROXY_COUNTRY", "lv")
+    monkeypatch.setenv("HARKEN_TIKTOK_MAX_RESULTS", "12")
+
     cfg = config.Config()
+
     assert cfg.source_options("bluesky") == {"lang": "lv"}
     assert cfg.source_options("x") == {"bearer_token": "x-token", "lang": "lv"}
-    assert cfg.source_options("youtube") == {
-        "api_key": "youtube-key",
-        "relevance_language": "lv",
-        "region_code": "LV",
-    }
+    assert cfg.source_options("youtube") == {"api_key": "youtube-key"}
     assert cfg.source_options("mastodon") == {
         "instance": "mastodon.social",
         "access_token": "mastodon-token",
-        "lang": "lv",
     }
     assert cfg.source_options("instagram") == {
         "access_token": "instagram-token",
         "user_id": "ig-user-id",
         "graph_base": "https://graph.facebook.com/v99.0",
     }
-
+    assert cfg.source_options("tiktok") == {
+        "apify_token": "apify-token",
+        "actor": "clockworks~tiktok-scraper",
+        "proxy_country": "LV",
+        "max_results": 12,
+    }
 
 def test_email_delivery_settings_are_loaded(monkeypatch):
     monkeypatch.setenv("HARKEN_EMAIL_TO", "ops@example.test, owner@example.test")
