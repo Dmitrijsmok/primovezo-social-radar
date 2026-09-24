@@ -165,14 +165,10 @@ class BlueskySource(Source):
             with self._client() as client:
                 did_response = client.get(f"https://{handle}/.well-known/atproto-did")
         except httpx.RequestError as exc:
-            raise RuntimeError(
-                f"Bluesky DID discovery failed: {type(exc).__name__}"
-            ) from None
+            raise RuntimeError(f"Bluesky DID discovery failed: {type(exc).__name__}") from None
 
         if did_response.status_code != 200:
-            raise RuntimeError(
-                f"Bluesky DID discovery failed with HTTP {did_response.status_code}"
-            )
+            raise RuntimeError(f"Bluesky DID discovery failed with HTTP {did_response.status_code}")
 
         did = did_response.text.strip()
         if not did.startswith("did:plc:"):
@@ -209,9 +205,7 @@ class BlueskySource(Source):
             if isinstance(endpoint, str) and endpoint.startswith("https://"):
                 return endpoint.rstrip("/")
 
-        raise RuntimeError(
-            "Bluesky DID document contains no HTTPS #atproto_pds service endpoint"
-        )
+        raise RuntimeError("Bluesky DID document contains no HTTPS #atproto_pds service endpoint")
 
     def _create_session(self) -> str:
         try:
