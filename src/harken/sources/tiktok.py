@@ -173,9 +173,7 @@ class TikTokSource(Source):
         if self._access_token and time.monotonic() < self._token_expires_at:
             return self._access_token
 
-        with self._client(
-            headers={"Content-Type": "application/x-www-form-urlencoded"}
-        ) as client:
+        with self._client(headers={"Content-Type": "application/x-www-form-urlencoded"}) as client:
             response = client.post(
                 _TOKEN_API,
                 data={
