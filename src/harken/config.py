@@ -151,6 +151,17 @@ class Config:
     bluesky_lang: str | None = field(
         default_factory=lambda: (os.getenv("HARKEN_BLUESKY_LANG") or "").strip() or None
     )
+    instagram_access_token: str | None = field(
+        default_factory=lambda: os.getenv("HARKEN_INSTAGRAM_ACCESS_TOKEN") or None
+    )
+    instagram_user_id: str | None = field(
+        default_factory=lambda: os.getenv("HARKEN_INSTAGRAM_USER_ID") or None
+    )
+    instagram_graph_base: str = field(
+        default_factory=lambda: (
+            os.getenv("HARKEN_INSTAGRAM_GRAPH_BASE") or "https://graph.facebook.com"
+        ).rstrip("/")
+    )
     mastodon_instance: str = field(
         default_factory=lambda: os.getenv("HARKEN_MASTODON_INSTANCE", "mastodon.social")
     )
@@ -284,6 +295,12 @@ class Config:
     def source_options(self, name: str) -> dict:
         if name == "bluesky":
             return {"lang": self.bluesky_lang}
+        if name == "instagram":
+            return {
+                "access_token": self.instagram_access_token,
+                "user_id": self.instagram_user_id,
+                "graph_base": self.instagram_graph_base,
+            }
         if name == "mastodon":
             return {
                 "instance": self.mastodon_instance,
