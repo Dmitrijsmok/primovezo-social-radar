@@ -142,6 +142,50 @@ def test_bluesky_parses_posts():
 
 
 @respx.mock
+def test_bluesky_fails_over_to_public_appview_on_forbidden():
+    primary = respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(403)
+    )
+    fallback = respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "posts": [
+                    {
+                        "uri": "at://did:plc:abc/app.bsky.feed.post/fallback",
+                        "author": {"handle": "fallback.bsky.social"},
+                        "record": {
+                            "text": "Shopify alternatīva",
+                            "createdAt": "2026-09-24T09:00:00Z",
+                        },
+                    }
+                ]
+            },
+        )
+    )
+
+    out = BlueskySource(lang="lv").fetch("Shopify")
+
+    assert primary.called
+    assert fallback.called
+    assert len(out) == 1
+    assert out[0].author == "fallback.bsky.social"
+
+
+@respx.mock
+def test_bluesky_raises_when_both_appviews_forbid_search():
+    respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(403)
+    )
+    respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(403)
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        BlueskySource().fetch("acme")
+
+
+@respx.mock
 def test_bluesky_page_preserves_api_cursor_and_since_boundary():
     route = respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
         return_value=httpx.Response(200, json={"posts": [], "cursor": "next-page"})
