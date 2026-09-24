@@ -179,7 +179,11 @@ def primovezo_source_status():
         ),
     ]
     for source, configured, notes in rows:
-        status = "[green]enabled[/green]" if source in enabled and configured else "[dim]disabled[/dim]"
+        status = (
+            "[green]enabled[/green]"
+            if source in enabled and configured
+            else "[dim]disabled[/dim]"
+        )
         if source == "bluesky":
             status = "[green]enabled[/green]"
         table.add_row(source, status, notes)
