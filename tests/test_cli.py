@@ -572,6 +572,7 @@ def test_live_email_test_uses_isolated_db_and_real_classification(monkeypatch):
                 "category": "ecommerce",
                 "reason": "Konkrēta interese par e-komercijas risinājumu.",
                 "suggested_reply": "Varam salīdzināt pieejas.",
+                "conversation": [],
                 "analyzed_at": "2026-09-24T08:00:00+00:00",
             }
 
@@ -697,6 +698,7 @@ def test_threads_status_reports_health_without_token_value(monkeypatch):
     assert result.exit_code == 0, result.output
     assert "Threads API: connected" in result.output
     assert "keyword_search: available" in result.output
+    assert "read_replies: missing" in result.output
     assert "Auto-refresh: enabled" in result.output
     assert secret not in result.output
 
