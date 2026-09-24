@@ -597,6 +597,20 @@ def test_threads_parses_keyword_search_and_pagination():
             },
         )
     )
+    respx.get("https://graph.threads.net/th-123").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "th-123",
+                "username": "alice",
+                "text": "Looking for an ecommerce platform",
+                "permalink": "https://www.threads.net/@alice/post/th-123",
+                "timestamp": "2026-09-23T09:30:00+0000",
+                "is_reply": False,
+                "has_replies": False,
+            },
+        )
+    )
     since = datetime(2026, 9, 23, 8, 0, tzinfo=timezone.utc)
     page = ThreadsSource(access_token="secret-token").fetch_page(
         "ecommerce", limit=25, cursor="current", since=since
@@ -705,6 +719,91 @@ def test_threads_reply_keyword_hit_is_normalized_to_root_conversation():
 
 
 @respx.mock
+def test_threads_keyword_search_200_recovers_own_reply_root_via_me_replies():
+    search = respx.get("https://graph.threads.net/keyword_search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "reply-owned-1",
+                        "username": "dmitry.mokeyev",
+                        "text": "Man Shopify daudz vairāk nepatīk par Mozello.",
+                        "permalink": "https://www.threads.com/@dmitry.mokeyev/post/reply-owned-1",
+                        "timestamp": "2026-09-24T09:30:00+0000",
+                    }
+                ],
+                "paging": {},
+            },
+        )
+    )
+    detail = respx.get("https://graph.threads.net/reply-owned-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "reply-owned-1",
+                "username": "dmitry.mokeyev",
+                "text": "Man Shopify daudz vairāk nepatīk par Mozello.",
+                "permalink": "https://www.threads.com/@dmitry.mokeyev/post/reply-owned-1",
+                "timestamp": "2026-09-24T09:30:00+0000",
+            },
+        )
+    )
+    own_replies = respx.get("https://graph.threads.net/me/replies").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "reply-owned-1",
+                        "username": "dmitry.mokeyev",
+                        "text": "Man Shopify daudz vairāk nepatīk par Mozello.",
+                        "permalink": "https://www.threads.com/@dmitry.mokeyev/post/reply-owned-1",
+                        "timestamp": "2026-09-24T09:30:00+0000",
+                        "is_reply": True,
+                        "is_reply_owned_by_me": True,
+                        "root_post": {"id": "root-prospect-1"},
+                        "replied_to": {"id": "root-prospect-1"},
+                    }
+                ]
+            },
+        )
+    )
+    root = respx.get("https://graph.threads.net/root-prospect-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "root-prospect-1",
+                "username": "prospect.owner",
+                "text": (
+                    "Internetveikala īpašnieki — kurā platformā izveidojāt savu veikalu, "
+                    "un vai ar savu izvēli esat apmierināti?"
+                ),
+                "permalink": "https://www.threads.com/@prospect.owner/post/root-prospect-1",
+                "timestamp": "2026-09-24T08:00:00+0000",
+                "has_replies": True,
+            },
+        )
+    )
+    conversation = respx.get(
+        "https://graph.threads.net/root-prospect-1/conversation"
+    ).mock(return_value=httpx.Response(403))
+
+    mention = ThreadsSource(access_token="token").fetch("Shopify")[0]
+
+    assert search.called and detail.called and own_replies.called and root.called
+    assert conversation.called
+    assert mention.author == "prospect.owner"
+    assert mention.url == "https://www.threads.com/@prospect.owner/post/root-prospect-1"
+    assert len(mention.conversation) == 2
+    assert mention.conversation[0].author == "prospect.owner"
+    assert mention.conversation[0].depth == 0
+    assert mention.conversation[1].author == "dmitry.mokeyev"
+    assert mention.conversation[1].depth == 1
+    assert mention.conversation[1].matched is True
+
+
+@respx.mock
 def test_threads_reply_context_survives_missing_full_conversation_permission():
     respx.get("https://graph.threads.net/keyword_search").mock(
         return_value=httpx.Response(
@@ -769,6 +868,7 @@ def test_threads_keyword_search_falls_back_when_relation_fields_are_rejected():
         ]
     )
     respx.get("https://graph.threads.net/th-plain").mock(return_value=httpx.Response(403))
+    respx.get("https://graph.threads.net/me/replies").mock(return_value=httpx.Response(403))
 
     mention = ThreadsSource(access_token="token").fetch("Shopify")[0]
 
