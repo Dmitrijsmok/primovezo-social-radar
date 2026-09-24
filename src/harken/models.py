@@ -11,7 +11,7 @@ import hashlib
 from datetime import datetime, timezone
 from enum import Enum
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class Sentiment(str, Enum):
@@ -20,6 +20,26 @@ class Sentiment(str, Enum):
     POSITIVE = "positive"
     NEUTRAL = "neutral"
     NEGATIVE = "negative"
+
+
+class ConversationPost(BaseModel):
+    """One post in a source conversation tree attached to a matched mention."""
+
+    id: str
+    author: str | None = None
+    text: str = ""
+    url: str | None = None
+    created_at: datetime
+    reply_to_id: str | None = None
+    depth: int = 0
+    matched: bool = False
+
+    @field_validator("created_at")
+    @classmethod
+    def _ensure_tz_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
 
 class Mention(BaseModel):
@@ -51,6 +71,10 @@ class Mention(BaseModel):
     lead_category: str | None = None
     lead_reason: str | None = None
     suggested_reply: str | None = None
+
+    # Optional source conversation context. For Threads this lets a keyword
+    # hit on a reply be represented by its root post plus the reply tree.
+    conversation: list[ConversationPost] = Field(default_factory=list)
 
     @field_validator("created_at")
     @classmethod

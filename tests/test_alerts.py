@@ -18,6 +18,7 @@ from harken.alerts import (
     resend_target_key,
     send_lead_digest_email,
     send_lead_digest_resend,
+    send_live_test_resend,
     send_negative_alert,
     send_negative_email,
     send_operational_resend,
@@ -26,7 +27,7 @@ from harken.alerts import (
     webhook_target_key,
 )
 from harken.config import Config
-from harken.models import Mention, Sentiment
+from harken.models import ConversationPost, Mention, Sentiment
 from harken.pipeline import Pipeline
 from harken.sources import REGISTRY
 from harken.thresholds import ThresholdEvent
@@ -241,6 +242,158 @@ def test_internal_lead_digest_resend_uses_api_and_idempotency():
     second_key = route.calls[1].request.headers["Idempotency-Key"]
     assert second_key == first_key
     assert resend_target_key(settings).startswith("resend-")
+
+
+@respx.mock
+def test_live_test_resend_is_clearly_marked_and_contains_real_classification():
+    route = respx.post("https://api.resend.com/emails").mock(
+        return_value=httpx.Response(200, json={"id": "email_live_test"})
+    )
+    settings = ResendSettings(
+        api_key="re_test_secret",
+        sender="noreply@primovezo.com",
+        recipients=("owner@example.test",),
+    )
+    mention = Mention(
+        source="bluesky",
+        query="e-komercija",
+        author="shop.bsky.social",
+        text="Diskusija par e-komercijas platformas izvēli Latvijā",
+        url="https://bsky.app/profile/shop/post/1",
+        created_at=datetime(2026, 9, 24, tzinfo=timezone.utc),
+        lead_relevant=False,
+        lead_score=42,
+        lead_category="other",
+        lead_reason="Nav pietiekami konkrēta komerciāla nodoma.",
+    )
+
+    send_live_test_resend(
+        settings,
+        [mention],
+        fetched=7,
+        qualified=0,
+        sources=["bluesky", "threads"],
+        issues=["threads fetch failed for 'Shopify': HTTP 503"],
+    )
+
+    request = route.calls[0].request
+    payload = json.loads(request.content)
+    assert request.headers["Idempotency-Key"].startswith("primovezo-live-test/")
+    assert payload["subject"] == ("[Primovezo Social Radar TEST] live scan: 7 fetched, 0 qualified")
+    assert "TEST ONLY" in payload["text"]
+    assert "real public-source fetch results" in payload["text"]
+    assert "AI relevant: no" in payload["text"]
+    assert "score: 42/100" in payload["text"]
+    assert "https://bsky.app/profile/shop/post/1" in payload["text"]
+    assert "threads fetch failed" in payload["text"]
+    assert "re_test_secret" not in payload["text"]
+
+
+@respx.mock
+def test_live_test_resend_renders_threads_conversation_hierarchy():
+    route = respx.post("https://api.resend.com/emails").mock(
+        return_value=httpx.Response(200, json={"id": "email_thread_tree"})
+    )
+    settings = ResendSettings(
+        api_key="re_test_secret",
+        sender="noreply@primovezo.com",
+        recipients=("owner@example.test",),
+    )
+    mention = Mention(
+        source="threads",
+        query="Shopify",
+        author="shop.owner",
+        text="Kuru platformu izvēlēties interneta veikalam?",
+        url="https://threads.test/root",
+        created_at=datetime(2026, 9, 24, 8, 0, tzinfo=timezone.utc),
+        lead_relevant=True,
+        lead_score=91,
+        lead_category="conversation",
+        lead_reason="Platformas izvēles diskusija.",
+        conversation=[
+            ConversationPost(
+                id="root",
+                author="shop.owner",
+                text="Kuru platformu izvēlēties interneta veikalam?",
+                url="https://threads.test/root",
+                created_at=datetime(2026, 9, 24, 8, 0, tzinfo=timezone.utc),
+                depth=0,
+            ),
+            ConversationPost(
+                id="reply",
+                author="dmitry.mokeyev",
+                text="Man Shopify vairāk nepatīk par Mozello.",
+                url="https://threads.test/reply",
+                created_at=datetime(2026, 9, 24, 9, 0, tzinfo=timezone.utc),
+                reply_to_id="root",
+                depth=1,
+                matched=True,
+            ),
+        ],
+    )
+
+    send_live_test_resend(
+        settings,
+        [mention],
+        fetched=1,
+        qualified=1,
+        sources=["threads"],
+    )
+
+    payload = json.loads(route.calls[0].request.content)
+    body = payload["text"]
+    assert "Conversation context:" in body
+    assert "ROOT @shop.owner" in body
+    assert "↳ @dmitry.mokeyev [keyword match]" in body
+    assert "Open root/source: https://threads.test/root" in body
+
+
+@respx.mock
+def test_live_test_resend_shows_excluded_mentions_only_as_diagnostics():
+    route = respx.post("https://api.resend.com/emails").mock(
+        return_value=httpx.Response(200, json={"id": "email_excluded_diag"})
+    )
+    settings = ResendSettings(
+        api_key="re_test_secret",
+        sender="noreply@primovezo.com",
+        recipients=("owner@example.test",),
+    )
+    excluded = Mention(
+        source="threads",
+        query="Shopify",
+        author="dmitry.mokeyev",
+        text="Mans paša reply",
+        url="https://threads.test/own-reply",
+        created_at=datetime(2026, 9, 24, 9, 0, tzinfo=timezone.utc),
+        conversation=[
+            ConversationPost(
+                id="own-reply",
+                author="dmitry.mokeyev",
+                text="Mans paša reply",
+                url="https://threads.test/own-reply",
+                created_at=datetime(2026, 9, 24, 9, 0, tzinfo=timezone.utc),
+                depth=0,
+                matched=True,
+            )
+        ],
+    )
+
+    send_live_test_resend(
+        settings,
+        [],
+        fetched=1,
+        qualified=0,
+        sources=["threads"],
+        excluded_mentions=[excluded],
+    )
+
+    payload = json.loads(route.calls[0].request.content)
+    body = payload["text"]
+    assert "Excluded diagnostic sample: 1" in body
+    assert "Production exclusion: own/team author" in body
+    assert "@dmitry.mokeyev [keyword match]" in body
+    assert "remain excluded from production lead classification and delivery" in body
+    assert "AI relevant: yes" not in body
 
 
 @respx.mock

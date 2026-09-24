@@ -25,16 +25,26 @@ def classify_leads(mentions: list[Mention], provider: LLMProvider) -> None:
     predictions: dict[str, dict] = {}
     for start in range(0, len(mentions), 20):
         batch = mentions[start : start + 20]
-        records = [
-            {
+        records = []
+        for mention in batch:
+            record = {
                 "id": mention.id,
                 "source": mention.source,
                 "keyword": mention.query,
                 "author": mention.author,
                 "text": mention.content[:1500],
             }
-            for mention in batch
-        ]
+            if mention.conversation:
+                record["conversation"] = [
+                    {
+                        "author": item.author,
+                        "text": item.text[:1200],
+                        "depth": item.depth,
+                        "matched": item.matched,
+                    }
+                    for item in mention.conversation[:25]
+                ]
+            records.append(record)
         prompt = (
             "Classify each public social post as a potential commercial lead for Primovezo, "
             "an ecommerce platform focused on the Latvian market. First decide whether the post "
@@ -43,6 +53,9 @@ def classify_leads(mentions: list[Mention], provider: LLMProvider) -> None:
             "all other non-Latvian posts do NOT qualify, even when they clearly discuss Latvia, "
             "ecommerce, Etsy, Shopify, WooCommerce, or alternatives. Do not translate a foreign "
             "post and then treat the translation itself as evidence of Latvian relevance. "
+            "When conversation context is supplied, classify the root/source conversation as a "
+            "whole rather than treating the matched reply as an isolated lead. A keyword may have "
+            "matched a reply while the actual prospect intent is in the root post. "
             "A relevant result can be either (1) a direct ecommerce lead with concrete buying, "
             "replacement, migration, setup, or implementation intent, or (2) a useful public "
             "conversation where mentioning Primovezo as another ecommerce-platform alternative "

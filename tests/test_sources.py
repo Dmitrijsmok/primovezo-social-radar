@@ -132,7 +132,7 @@ def test_bluesky_parses_posts():
             }
         ]
     }
-    respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+    respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
         return_value=httpx.Response(200, json=payload)
     )
     out = BlueskySource().fetch("acme")
@@ -142,8 +142,238 @@ def test_bluesky_parses_posts():
 
 
 @respx.mock
+def test_bluesky_fails_over_to_api_appview_on_forbidden():
+    primary = respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(403)
+    )
+    fallback = respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "posts": [
+                    {
+                        "uri": "at://did:plc:abc/app.bsky.feed.post/fallback",
+                        "author": {"handle": "fallback.bsky.social"},
+                        "record": {
+                            "text": "Shopify alternatīva",
+                            "createdAt": "2026-09-24T09:00:00Z",
+                        },
+                    }
+                ]
+            },
+        )
+    )
+
+    out = BlueskySource(lang="lv").fetch("Shopify")
+
+    assert primary.called
+    assert fallback.called
+    assert len(out) == 1
+    assert out[0].author == "fallback.bsky.social"
+
+
+@respx.mock
+def test_bluesky_uses_authenticated_pds_proxy_without_probing_public_appviews():
+    BlueskySource._session_cache.clear()
+    public = respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(403)
+    )
+    alternate = respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(403)
+    )
+    login = respx.post("https://bsky.social/xrpc/com.atproto.server.createSession").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "accessJwt": "access-jwt",
+                "refreshJwt": "refresh-jwt",
+                "handle": "radar.bsky.social",
+                "did": "did:plc:radar",
+            },
+        )
+    )
+    proxied = respx.get("https://bsky.social/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "posts": [
+                    {
+                        "uri": "at://did:plc:abc/app.bsky.feed.post/proxied",
+                        "author": {"handle": "prospect.bsky.social"},
+                        "record": {
+                            "text": "Meklēju Shopify alternatīvu",
+                            "createdAt": "2026-09-24T10:00:00Z",
+                        },
+                    }
+                ]
+            },
+        )
+    )
+
+    out = BlueskySource(
+        lang="lv",
+        identifier="radar.bsky.social",
+        app_password="app-password-secret",
+        pds="https://bsky.social",
+    ).fetch("Shopify")
+
+    assert not public.called and not alternate.called
+    assert login.called and proxied.called
+    login_payload = json.loads(login.calls[0].request.content)
+    assert login_payload == {
+        "identifier": "radar.bsky.social",
+        "password": "app-password-secret",
+    }
+    proxy_request = proxied.calls[0].request
+    assert proxy_request.headers["authorization"] == "Bearer access-jwt"
+    assert proxy_request.headers["atproto-proxy"] == "did:web:api.bsky.app#bsky_appview"
+    assert proxy_request.url.params["q"] == "Shopify"
+    assert proxy_request.url.params["lang"] == "lv"
+    assert len(out) == 1
+    assert out[0].author == "prospect.bsky.social"
+
+
+@respx.mock
+def test_bluesky_auto_discovers_account_pds_from_handle_did_document():
+    BlueskySource._session_cache.clear()
+    BlueskySource._pds_cache.clear()
+    did = "did:plc:zhlgr4h57wecaecsmbvugeop"
+    pds = "https://coral.us-east.host.bsky.network"
+
+    well_known = respx.get("https://dorsmok.bsky.social/.well-known/atproto-did").mock(
+        return_value=httpx.Response(200, text=did)
+    )
+    plc = respx.get(f"https://plc.directory/{did}").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": did,
+                "alsoKnownAs": ["at://dorsmok.bsky.social"],
+                "service": [
+                    {
+                        "id": "#atproto_pds",
+                        "type": "AtprotoPersonalDataServer",
+                        "serviceEndpoint": pds,
+                    }
+                ],
+            },
+        )
+    )
+    login = respx.post(f"{pds}/xrpc/com.atproto.server.createSession").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "accessJwt": "access-jwt",
+                "refreshJwt": "refresh-jwt",
+                "handle": "dorsmok.bsky.social",
+                "did": did,
+            },
+        )
+    )
+    proxied = respx.get(f"{pds}/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(200, json={"posts": []})
+    )
+
+    out = BlueskySource(
+        identifier="dorsmok.bsky.social",
+        app_password="app-password-secret",
+    ).fetch("Shopify")
+
+    assert out == []
+    assert well_known.called and plc.called and login.called and proxied.called
+    assert login.calls[0].request.url.host == "coral.us-east.host.bsky.network"
+    assert proxied.calls[0].request.headers["atproto-proxy"] == (
+        "did:web:api.bsky.app#bsky_appview"
+    )
+
+
+@respx.mock
+def test_bluesky_public_block_without_auth_has_actionable_sanitized_error():
+    BlueskySource._session_cache.clear()
+    respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(403)
+    )
+    respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(403)
+    )
+
+    with pytest.raises(RuntimeError, match="HARKEN_BLUESKY_APP_PASSWORD") as exc:
+        BlueskySource().fetch("acme")
+
+    assert "403" not in str(exc.value)
+
+
+def test_bluesky_normalizes_handle_prefix_and_app_password_whitespace():
+    source = BlueskySource(
+        identifier="  @Radar.Bsky.Social  ",
+        app_password="abcd- efgh\n-ijkl -mnop",
+    )
+
+    assert source.identifier == "Radar.Bsky.Social"
+    assert source.app_password == "abcd-efgh-ijkl-mnop"
+
+
+@respx.mock
+def test_bluesky_login_error_is_sanitized_but_actionable():
+    BlueskySource._session_cache.clear()
+    secret = "abcd-efgh-ijkl-mnop"
+    respx.post("https://bsky.social/xrpc/com.atproto.server.createSession").mock(
+        return_value=httpx.Response(
+            401,
+            json={
+                "error": "AuthenticationRequired",
+                "message": "Invalid identifier or password",
+            },
+        )
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        BlueskySource(
+            identifier="radar.bsky.social",
+            app_password=secret,
+            pds="https://bsky.social",
+        ).fetch("Shopify")
+
+    message = str(exc.value)
+    assert "HTTP 401" in message
+    assert "AuthenticationRequired" in message
+    assert "Invalid identifier or password" in message
+    assert secret not in message
+    assert "accessJwt" not in message
+
+
+@respx.mock
+def test_bluesky_authenticated_proxy_relogs_once_after_expired_session():
+    BlueskySource._session_cache.clear()
+    login = respx.post("https://bsky.social/xrpc/com.atproto.server.createSession").mock(
+        side_effect=[
+            httpx.Response(200, json={"accessJwt": "old-jwt"}),
+            httpx.Response(200, json={"accessJwt": "new-jwt"}),
+        ]
+    )
+    proxied = respx.get("https://bsky.social/xrpc/app.bsky.feed.searchPosts").mock(
+        side_effect=[
+            httpx.Response(401),
+            httpx.Response(200, json={"posts": []}),
+        ]
+    )
+
+    out = BlueskySource(
+        identifier="radar.bsky.social",
+        app_password="app-password-secret",
+        pds="https://bsky.social",
+    ).fetch("Shopify")
+
+    assert out == []
+    assert login.call_count == 2
+    assert proxied.call_count == 2
+    assert proxied.calls[0].request.headers["authorization"] == "Bearer old-jwt"
+    assert proxied.calls[1].request.headers["authorization"] == "Bearer new-jwt"
+
+
+@respx.mock
 def test_bluesky_page_preserves_api_cursor_and_since_boundary():
-    route = respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+    route = respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
         return_value=httpx.Response(200, json={"posts": [], "cursor": "next-page"})
     )
     since = datetime(2026, 6, 1, tzinfo=timezone.utc)
@@ -156,7 +386,7 @@ def test_bluesky_page_preserves_api_cursor_and_since_boundary():
 
 @respx.mock
 def test_bluesky_can_filter_by_language():
-    route = respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+    route = respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
         return_value=httpx.Response(200, json={"posts": []})
     )
     BlueskySource(lang="lv").fetch("Shopify alternatīva", limit=100)
@@ -367,6 +597,20 @@ def test_threads_parses_keyword_search_and_pagination():
             },
         )
     )
+    respx.get("https://graph.threads.net/th-123").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "th-123",
+                "username": "alice",
+                "text": "Looking for an ecommerce platform",
+                "permalink": "https://www.threads.net/@alice/post/th-123",
+                "timestamp": "2026-09-23T09:30:00+0000",
+                "is_reply": False,
+                "has_replies": False,
+            },
+        )
+    )
     since = datetime(2026, 9, 23, 8, 0, tzinfo=timezone.utc)
     page = ThreadsSource(access_token="secret-token").fetch_page(
         "ecommerce", limit=25, cursor="current", since=since
@@ -385,6 +629,212 @@ def test_threads_parses_keyword_search_and_pagination():
     assert page.mentions[0].source == "threads"
     assert page.mentions[0].author == "alice"
     assert page.mentions[0].url == "https://www.threads.net/@alice/post/th-123"
+
+
+@respx.mock
+def test_threads_reply_keyword_hit_is_normalized_to_root_conversation():
+    search = respx.get("https://graph.threads.net/keyword_search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "reply-1",
+                        "username": "dmitry.mokeyev",
+                        "text": "Man Shopify vairāk nepatīk par Mozello.",
+                        "permalink": "https://www.threads.com/@dmitry.mokeyev/post/reply-1",
+                        "timestamp": "2026-09-24T09:30:00+0000",
+                        "is_reply": True,
+                        "root_post": {"id": "root-1"},
+                        "replied_to": {"id": "root-1"},
+                    }
+                ],
+                "paging": {},
+            },
+        )
+    )
+    root = respx.get("https://graph.threads.net/root-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "root-1",
+                "username": "shop.owner",
+                "text": (
+                    "Internetveikala īpašnieki — kurā platformā izveidojāt savu veikalu, "
+                    "un vai ar savu izvēli esat apmierināti?"
+                ),
+                "permalink": "https://www.threads.com/@shop.owner/post/root-1",
+                "timestamp": "2026-09-24T08:00:00+0000",
+                "has_replies": True,
+            },
+        )
+    )
+    conversation = respx.get("https://graph.threads.net/root-1/conversation").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "reply-1",
+                        "username": "dmitry.mokeyev",
+                        "text": "Man Shopify vairāk nepatīk par Mozello.",
+                        "permalink": "https://www.threads.com/@dmitry.mokeyev/post/reply-1",
+                        "timestamp": "2026-09-24T09:30:00+0000",
+                        "is_reply": True,
+                        "root_post": {"id": "root-1"},
+                        "replied_to": {"id": "root-1"},
+                    },
+                    {
+                        "id": "reply-2",
+                        "username": "another.user",
+                        "text": "Es izvēlējos WooCommerce.",
+                        "permalink": "https://www.threads.com/@another.user/post/reply-2",
+                        "timestamp": "2026-09-24T09:40:00+0000",
+                        "is_reply": True,
+                        "root_post": {"id": "root-1"},
+                        "replied_to": {"id": "reply-1"},
+                    },
+                ]
+            },
+        )
+    )
+
+    page = ThreadsSource(access_token="secret-token").fetch_page("Shopify", limit=10)
+
+    assert search.called and root.called and conversation.called
+    assert len(page.mentions) == 1
+    mention = page.mentions[0]
+    assert mention.author == "shop.owner"
+    assert mention.url == "https://www.threads.com/@shop.owner/post/root-1"
+    assert "kurā platformā" in mention.text
+    assert [item.author for item in mention.conversation] == [
+        "shop.owner",
+        "dmitry.mokeyev",
+        "another.user",
+    ]
+    assert mention.conversation[0].depth == 0
+    assert mention.conversation[1].depth == 1
+    assert mention.conversation[1].matched is True
+    assert mention.conversation[2].depth == 2
+
+
+@respx.mock
+def test_threads_skips_reply_when_meta_omits_root_relationship():
+    search = respx.get("https://graph.threads.net/keyword_search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "reply-owned-1",
+                        "username": "dmitry.mokeyev",
+                        "text": "Man Shopify daudz vairāk nepatīk par Mozello.",
+                        "permalink": "https://www.threads.com/@dmitry.mokeyev/post/reply-owned-1",
+                        "timestamp": "2026-09-24T09:30:00+0000",
+                        "is_reply": True,
+                        "is_reply_owned_by_me": True,
+                        "has_replies": True,
+                    }
+                ],
+                "paging": {},
+            },
+        )
+    )
+    detail = respx.get("https://graph.threads.net/reply-owned-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "reply-owned-1",
+                "username": "dmitry.mokeyev",
+                "text": "Man Shopify daudz vairāk nepatīk par Mozello.",
+                "permalink": "https://www.threads.com/@dmitry.mokeyev/post/reply-owned-1",
+                "timestamp": "2026-09-24T09:30:00+0000",
+                "is_reply": True,
+                "is_reply_owned_by_me": True,
+                "has_replies": True,
+            },
+        )
+    )
+
+    page = ThreadsSource(access_token="token").fetch_page("Shopify")
+
+    assert search.called and detail.called
+    assert page.mentions == []
+
+
+@respx.mock
+def test_threads_reply_context_survives_missing_full_conversation_permission():
+    respx.get("https://graph.threads.net/keyword_search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "reply-1",
+                        "username": "reply.user",
+                        "text": "Shopify",
+                        "timestamp": "2026-09-24T09:30:00+0000",
+                        "is_reply": True,
+                        "root_post": {"id": "root-1"},
+                        "replied_to": {"id": "root-1"},
+                    }
+                ]
+            },
+        )
+    )
+    respx.get("https://graph.threads.net/root-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "root-1",
+                "username": "prospect",
+                "text": "Kuru platformu izvēlēties interneta veikalam?",
+                "timestamp": "2026-09-24T08:00:00+0000",
+            },
+        )
+    )
+    respx.get("https://graph.threads.net/root-1/conversation").mock(
+        return_value=httpx.Response(403)
+    )
+
+    mention = ThreadsSource(access_token="token").fetch("Shopify")[0]
+
+    assert mention.author == "prospect"
+    assert len(mention.conversation) == 2
+    assert mention.conversation[0].author == "prospect"
+    assert mention.conversation[1].author == "reply.user"
+    assert mention.conversation[1].matched is True
+
+
+@respx.mock
+def test_threads_keyword_search_falls_back_when_relation_fields_are_rejected():
+    route = respx.get("https://graph.threads.net/keyword_search").mock(
+        side_effect=[
+            httpx.Response(400, json={"error": {"message": "unsupported fields"}}),
+            httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "id": "th-plain",
+                            "username": "alice",
+                            "text": "Shopify",
+                            "timestamp": "2026-09-24T09:30:00+0000",
+                        }
+                    ]
+                },
+            ),
+        ]
+    )
+    respx.get("https://graph.threads.net/th-plain").mock(return_value=httpx.Response(403))
+
+    page = ThreadsSource(access_token="token").fetch_page("Shopify")
+
+    assert route.call_count == 2
+    assert (
+        route.calls[0].request.url.params["fields"] != route.calls[1].request.url.params["fields"]
+    )
+    assert page.mentions == []
 
 
 def test_threads_requires_access_token():

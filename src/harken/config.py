@@ -147,9 +147,21 @@ class Config:
     lead_fallback_alerts: bool = field(
         default_factory=lambda: _bool_env("HARKEN_LEAD_FALLBACK_ALERTS", True)
     )
+    lead_excluded_authors: list[str] = field(
+        default_factory=lambda: _env_list("HARKEN_LEAD_EXCLUDED_AUTHORS")
+    )
     # source-specific options
     bluesky_lang: str | None = field(
         default_factory=lambda: (os.getenv("HARKEN_BLUESKY_LANG") or "").strip() or None
+    )
+    bluesky_identifier: str | None = field(
+        default_factory=lambda: (os.getenv("HARKEN_BLUESKY_IDENTIFIER") or "").strip() or None
+    )
+    bluesky_app_password: str | None = field(
+        default_factory=lambda: (os.getenv("HARKEN_BLUESKY_APP_PASSWORD") or "").strip() or None
+    )
+    bluesky_pds: str | None = field(
+        default_factory=lambda: (os.getenv("HARKEN_BLUESKY_PDS") or "").strip().rstrip("/") or None
     )
     instagram_access_token: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_INSTAGRAM_ACCESS_TOKEN") or None
@@ -276,6 +288,10 @@ class Config:
             raise ValueError("HARKEN_SMTP_USERNAME and HARKEN_SMTP_PASSWORD must be set together")
         if bool(self.resend_api_key) != bool(self.resend_to):
             raise ValueError("HARKEN_RESEND_API_KEY and HARKEN_RESEND_TO must be set together")
+        if bool(self.bluesky_identifier) != bool(self.bluesky_app_password):
+            raise ValueError(
+                "HARKEN_BLUESKY_IDENTIFIER and HARKEN_BLUESKY_APP_PASSWORD must be set together"
+            )
         if bool(self.auth_username) != bool(self.auth_password):
             raise ValueError("HARKEN_AUTH_USERNAME and HARKEN_AUTH_PASSWORD must be set together")
         if self.auth_mode == "basic" and not (self.auth_username and self.auth_password):
@@ -287,9 +303,25 @@ class Config:
                 "HARKEN_AUTH_USERNAME and HARKEN_AUTH_PASSWORD require basic auth mode"
             )
 
+    def is_lead_author_excluded(self, author: str | None) -> bool:
+        if not author:
+            return False
+        normalized = author.strip().lstrip("@").casefold()
+        excluded = {
+            value.strip().lstrip("@").casefold()
+            for value in self.lead_excluded_authors
+            if value.strip()
+        }
+        return normalized in excluded
+
     def source_options(self, name: str) -> dict:
         if name == "bluesky":
-            return {"lang": self.bluesky_lang}
+            return {
+                "lang": self.bluesky_lang,
+                "identifier": self.bluesky_identifier,
+                "app_password": self.bluesky_app_password,
+                "pds": self.bluesky_pds,
+            }
         if name == "instagram":
             return {
                 "access_token": self.instagram_access_token,

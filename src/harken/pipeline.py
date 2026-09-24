@@ -56,6 +56,7 @@ class TrackResult:
     lead_analysis_error: str | None = None
     lead_candidates: int = 0
     lead_candidate_mentions: list[Mention] = field(default_factory=list)
+    fetched_mentions: list[Mention] = field(default_factory=list)
     analysis_error: str | None = None
     alerted: int = 0
     alert_pending: int = 0
@@ -206,6 +207,12 @@ class Pipeline:
             }.values()
         )
         lead_mentions = collected if classify_fetched else new_mentions
+        if self.config.lead_excluded_authors:
+            lead_mentions = [
+                mention
+                for mention in lead_mentions
+                if not self.config.is_lead_author_excluded(mention.author)
+            ]
 
         if self.config.lead_enabled:
             # Normal incremental scans classify only newly discovered mentions.
@@ -232,6 +239,7 @@ class Pipeline:
             ]
 
         result.fetched = len(collected)
+        result.fetched_mentions = list(collected)
         # Pre-cluster ingest: these mentions carry no theme yet, so preserve any
         # existing labels here; themes are (re)clustered and written below.
         result.new = self.store.upsert(collected, update_theme=False)

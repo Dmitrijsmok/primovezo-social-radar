@@ -11,6 +11,7 @@ from collections import defaultdict
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import typer
 from rich.console import Console
@@ -26,6 +27,7 @@ from harken.alerts import (
     send_lead_alert,
     send_lead_digest_email,
     send_lead_digest_resend,
+    send_live_test_resend,
     send_negative_alert,
     send_negative_email,
     send_operational_resend,
@@ -75,6 +77,17 @@ PRIMOVEZO_ALLOWED_SOURCES = {
 }
 
 
+PRIMOVEZO_LIVE_TEST_QUERIES = (
+    "interneta veikals",
+    "interneta veikala platforma",
+    "e-komercija",
+    "Shopify",
+    "WooCommerce",
+    "Mozello",
+    "pārdot internetā",
+)
+
+
 def _prepare_primovezo_threads(cfg: Config) -> str | None:
     token = cfg.threads_access_token
     if not token:
@@ -96,11 +109,19 @@ def _prepare_primovezo_threads(cfg: Config) -> str | None:
             else "unknown"
         )
         console.print(f"[green]✓[/green] Threads token auto-refreshed; new expiry: {expires}")
-        return None
+
+    issues: list[str] = []
     if maintenance.refresh_error:
-        message = (
+        issues.append(
             f"Threads token refresh failed; current valid token kept: {maintenance.refresh_error}"
         )
+    if "threads_read_replies" not in maintenance.info.scopes:
+        issues.append(
+            "Threads token is missing threads_read_replies permission; "
+            "reply/root conversation hierarchy is unavailable"
+        )
+    if issues:
+        message = "; ".join(issues)
         console.print(f"[yellow]![/yellow] {message}")
         return message
     return None
@@ -145,8 +166,10 @@ def threads_status():
         remaining = f"{max(0, (info.expires_at - now).total_seconds() / 86400):.1f} days"
 
     keyword = "available" if "threads_keyword_search" in info.scopes else "missing"
+    replies = "available" if "threads_read_replies" in info.scopes else "missing"
     console.print("Threads API: connected")
     console.print(f"keyword_search: {keyword}")
+    console.print(f"read_replies: {replies}")
     console.print(f"Token expires: {expiry}")
     console.print(f"Remaining: {remaining}")
     console.print("Auto-refresh: enabled when fewer than 14 days remain")
@@ -162,12 +185,18 @@ def primovezo_source_status():
     table.add_column("status")
     table.add_column("notes")
 
+    bluesky_auth = bool(cfg.bluesky_identifier and cfg.bluesky_app_password)
     rows = [
-        ("bluesky", True, "public search · lang=lv"),
+        (
+            "bluesky",
+            True,
+            "public search · authenticated PDS fallback "
+            + ("configured" if bluesky_auth else "not configured"),
+        ),
         (
             "threads",
             bool(cfg.threads_access_token),
-            "keyword search · strict Latvian classifier",
+            "keyword search · root/reply context when Meta returns relation IDs",
         ),
         (
             "instagram",
@@ -183,6 +212,188 @@ def primovezo_source_status():
             status = "[green]enabled[/green]"
         table.add_row(source, status, notes)
     console.print(table)
+
+
+@lead_app.command("live-email-test")
+def primovezo_live_email_test(
+    sources: str = typer.Option(
+        None,
+        help="Comma-separated live sources. Default: configured Primovezo production sources.",
+    ),
+    limit: int = typer.Option(
+        10,
+        min=1,
+        max=25,
+        help="Max live items per source and test keyword.",
+    ),
+    days: int = typer.Option(
+        5,
+        min=1,
+        max=30,
+        help="Recent lookback window used by sources that support time filtering.",
+    ),
+):
+    """Send one isolated Resend diagnostic built from real live-source results."""
+    base_cfg = Config()
+    resend = _resend_settings(base_cfg)
+    if resend is None:
+        raise typer.BadParameter(
+            "Live email testing requires HARKEN_RESEND_API_KEY and HARKEN_RESEND_TO.",
+            param_hint="HARKEN_RESEND_API_KEY/HARKEN_RESEND_TO",
+        )
+
+    if sources:
+        selected_sources = list(
+            dict.fromkeys(name.strip().lower() for name in sources.split(",") if name.strip())
+        )
+        if not selected_sources:
+            raise typer.BadParameter("provide at least one source", param_hint="--sources")
+    else:
+        selected_sources = _primovezo_auto_sources(base_cfg)
+
+    disallowed_sources = sorted(set(selected_sources) - PRIMOVEZO_ALLOWED_SOURCES)
+    if disallowed_sources:
+        allowed = ", ".join(sorted(PRIMOVEZO_ALLOWED_SOURCES))
+        blocked = ", ".join(disallowed_sources)
+        raise typer.BadParameter(
+            f"Live Primovezo email test does not use: {blocked}. Allowed sources: {allowed}.",
+            param_hint="--sources",
+        )
+
+    issues: list[str] = []
+    if "threads" in selected_sources:
+        threads_issue = _prepare_primovezo_threads(base_cfg)
+        if threads_issue:
+            issues.append(threads_issue)
+
+    total_fetched = 0
+    qualified_keys: set[tuple[str, str]] = set()
+    sample_by_key: dict[tuple[str, str], Mention] = {}
+    excluded_sample_by_key: dict[tuple[str, str], Mention] = {}
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    console.print(
+        Panel.fit(
+            "[bold]Primovezo live email test[/bold]\n"
+            f"real public-source fetch · {', '.join(selected_sources)} · "
+            f"{len(PRIMOVEZO_LIVE_TEST_QUERIES)} test keywords",
+            border_style="cyan",
+        )
+    )
+
+    with TemporaryDirectory(prefix="harken-live-email-test-") as tmp_dir:
+        test_cfg = _tracking_config(
+            ",".join(selected_sources),
+            limit,
+            str(Path(tmp_dir) / "live-test.db"),
+        )
+        test_cfg.threads_access_token = base_cfg.threads_access_token
+        test_cfg.lead_enabled = True
+        test_cfg.lead_fallback_alerts = False
+        _apply_primovezo_source_locales(test_cfg)
+        scan_cfg = replace(
+            test_cfg,
+            email_to=[],
+            email_from=None,
+            smtp_host=None,
+            smtp_username=None,
+            smtp_password=None,
+            resend_api_key=None,
+            resend_to=[],
+            webhook_url=None,
+        )
+
+        pipe = Pipeline(scan_cfg)
+        try:
+            for query in PRIMOVEZO_LIVE_TEST_QUERIES:
+                try:
+                    result = pipe.track(
+                        query,
+                        pages=1,
+                        since_override=cutoff,
+                        classify_fetched=True,
+                        update_source_state=False,
+                    )
+                except Exception as exc:
+                    issues.append(f"scan crashed for {query!r}: {type(exc).__name__}: {exc}")
+                    continue
+
+                total_fetched += result.fetched
+                issues.extend(
+                    f"{source} fetch failed for {query!r}: {error}"
+                    for source, error in result.errors.items()
+                )
+                if result.lead_analysis_error:
+                    issues.append(
+                        f"lead classifier failed for {query!r}: {result.lead_analysis_error}"
+                    )
+                qualified_keys.update(
+                    (mention.source, mention.id) for mention in result.lead_candidate_mentions
+                )
+
+                for mention in result.fetched_mentions:
+                    if not base_cfg.is_lead_author_excluded(mention.author):
+                        continue
+                    key = (mention.source, mention.id)
+                    existing = excluded_sample_by_key.get(key)
+                    if existing is None or mention.created_at > existing.created_at:
+                        excluded_sample_by_key[key] = mention
+
+                for mention in pipe.store.mentions(query=query, limit=None):
+                    if base_cfg.is_lead_author_excluded(mention.author):
+                        continue
+                    analysis = pipe.store.lead_analysis(query, mention.id)
+                    if analysis is not None:
+                        mention.lead_relevant = analysis["relevant"]
+                        mention.lead_score = analysis["score"]
+                        mention.lead_category = analysis["category"]
+                        mention.lead_reason = analysis["reason"]
+                        mention.suggested_reply = analysis["suggested_reply"]
+                        mention.conversation = analysis["conversation"]
+                    key = (mention.source, mention.id)
+                    existing = sample_by_key.get(key)
+                    if existing is None or (mention.lead_score or -1) > (existing.lead_score or -1):
+                        sample_by_key[key] = mention
+        finally:
+            pipe.close()
+
+    samples = sorted(
+        sample_by_key.values(),
+        key=lambda mention: (
+            mention.lead_relevant is True,
+            mention.lead_score if mention.lead_score is not None else -1,
+            mention.created_at,
+        ),
+        reverse=True,
+    )
+    excluded_samples = sorted(
+        excluded_sample_by_key.values(),
+        key=lambda mention: mention.created_at,
+        reverse=True,
+    )
+    unique_issues = list(dict.fromkeys(issues))
+
+    try:
+        send_live_test_resend(
+            resend,
+            samples,
+            fetched=total_fetched,
+            qualified=len(qualified_keys),
+            sources=selected_sources,
+            issues=unique_issues,
+            excluded_mentions=excluded_samples,
+        )
+    except Exception as exc:
+        console.print(f"[red]Live email test failed:[/red] {type(exc).__name__}: {exc}")
+        raise typer.Exit(1) from exc
+
+    console.print(
+        f"[green]✓[/green] live test email delivered · {total_fetched} fetched · "
+        f"{len(qualified_keys)} qualified · {len(unique_issues)} operational issue(s)"
+    )
+    console.print(
+        "[dim]Production harken.db and source cursors were not modified by this test.[/dim]"
+    )
 
 
 def _version(value: bool):

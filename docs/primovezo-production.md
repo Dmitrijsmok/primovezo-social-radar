@@ -26,6 +26,19 @@ uv run harken test-alert --transport resend --kind lead
 uv run harken test-alert --transport resend --kind operational
 ```
 
+For an end-to-end test with real current public-source data, use the isolated live email test:
+
+```bash
+uv run harken leads live-email-test
+```
+
+This command scans a small representative set of Primovezo ecommerce queries against the
+currently configured free/official Primovezo sources, runs the normal lead classifier, and
+sends one clearly marked `[Primovezo Social Radar TEST]` message through Resend. It uses a
+temporary SQLite database and does not update production `harken.db` or source cursors. The
+email is sent even when no post reaches the production lead threshold, so delivery and source
+health can be verified without weakening production filtering.
+
 The Resend request uses an idempotency key derived from the digest contents and
 delivery target. Identical retries within Resend's idempotency window therefore
 do not create a second copy of the same digest.
@@ -64,7 +77,36 @@ HARKEN_THREADS_ACCESS_TOKEN=<token>
 ```
 
 Without that variable, Threads stays disabled. Primovezo always keeps Bluesky
-enabled and also auto-enables Instagram when its official Meta credentials are present:
+enabled.
+
+Bluesky public search is attempted without credentials first. Some datacenter egress
+addresses can receive HTTP 403 from both public AppView hosts. For a reliable production
+fallback, create a dedicated Bluesky **app password** and configure:
+
+```dotenv
+HARKEN_BLUESKY_IDENTIFIER=your-handle.bsky.social
+HARKEN_BLUESKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+# Optional override only; normally auto-discovered from the account DID:
+# HARKEN_BLUESKY_PDS=https://your-account-pds.example
+```
+
+Do not use the main Bluesky account password. When these credentials are configured, Harken
+resolves the handle to its DID, reads the DID document's `#atproto_pds` endpoint, skips the
+public AppView hosts entirely, creates a short-lived session on that account PDS, and proxies
+`app.bsky.feed.searchPosts` to the Bluesky AppView through the official
+`atproto-proxy` service identifier. The app password is never included in search URLs or
+application logs. Without configured credentials Harken keeps the zero-config public path; if
+both public hosts are blocked it fails once with an actionable configuration error instead of
+retrying the same raw 403.
+
+Quick isolated verification:
+
+```bash
+rm -f /tmp/harken-bsky-test.db
+uv run harken track Shopify --sources bluesky --limit 1 --db /tmp/harken-bsky-test.db
+```
+
+Primovezo also auto-enables Instagram when its official Meta credentials are present:
 
 ```dotenv
 HARKEN_INSTAGRAM_ACCESS_TOKEN=<instagram-user-token>
@@ -92,8 +134,15 @@ requests captions, engagement metadata, and available `voice_to_text`. TikTok's 
 condition searches the video description, so spoken text enriches analysis but does not by
 itself make a video discoverable.
 
-Use a **long-lived** Threads token. Before every Primovezo daily/recent scan, Harken
-checks its validity, `threads_keyword_search` scope, and expiry. If fewer than 14 days
+Use a **long-lived** Threads token. For keyword discovery it needs
+`threads_keyword_search`. For root-post/reply hierarchy in reports it should also have
+`threads_read_replies`. Meta documents `root_post` and `replied_to` on reply objects,
+but the live API can still return `is_reply=true` while omitting both relation IDs. Harken
+never classifies such an unresolved reply as a standalone lead; it is skipped rather than
+risking a false-positive author/context match. When Meta does return `root_post`, Harken
+normalizes the hit to the root post and includes available conversation replies. Before every
+Primovezo daily/recent scan, Harken checks token validity and expiry; missing reply-read scope
+is reported as an operational warning while keyword discovery continues. If fewer than 14 days
 remain, Harken calls the Threads refresh endpoint and atomically updates only
 `HARKEN_THREADS_ACCESS_TOKEN` in the repository's local `.env`. The current token
 remains in use if a refresh attempt fails while it is still valid, so the next daily
@@ -121,6 +170,16 @@ harken logs
 The scan stores qualified leads even if Resend is not configured. With Resend
 configured, the full scan sends one de-duplicated internal digest only when
 there are new or previously queued qualified leads.
+
+Exclude Primovezo/team-owned social accounts from lead classification and email delivery:
+
+```dotenv
+HARKEN_LEAD_EXCLUDED_AUTHORS=dmitry.mokeyev
+```
+
+Excluded authors are still fetched and stored for source visibility, but they are not sent to
+the lead classifier and never become lead candidates. Add additional owned handles as a
+comma-separated list.
 
 The same internal Resend recipient also receives **one operational warning per
 daily run** when the scan completes only partially, for example after a source

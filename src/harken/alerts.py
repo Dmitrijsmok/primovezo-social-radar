@@ -259,6 +259,67 @@ def send_lead_digest_resend(settings: ResendSettings, mentions: list[Mention]) -
         raise ResendDeliveryError(f"Resend request failed: {type(exc).__name__}") from None
 
 
+def send_live_test_resend(
+    settings: ResendSettings,
+    mentions: list[Mention],
+    *,
+    fetched: int,
+    qualified: int,
+    sources: list[str],
+    issues: list[str] | None = None,
+    excluded_mentions: list[Mention] | None = None,
+) -> None:
+    """Send one clearly marked live-source diagnostic digest through Resend."""
+    configured = settings.validated()
+    run_at = datetime.now(timezone.utc)
+    cleaned_issues = [issue.strip() for issue in issues or [] if issue and issue.strip()]
+    source_names = list(dict.fromkeys(source.strip() for source in sources if source.strip()))
+    subject = f"[Primovezo Social Radar TEST] live scan: {fetched} fetched, {qualified} qualified"
+    body = _live_test_text(
+        mentions,
+        fetched=fetched,
+        qualified=qualified,
+        sources=source_names,
+        issues=cleaned_issues,
+        run_at=run_at,
+        excluded_mentions=excluded_mentions or [],
+    )
+    identity = (
+        configured.sender
+        + "|"
+        + ",".join(sorted(configured.recipients, key=str.casefold))
+        + "|"
+        + run_at.isoformat()
+        + "|"
+        + body
+    )
+    idempotency_key = (
+        "primovezo-live-test/" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:48]
+    )
+    try:
+        response = httpx.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {configured.api_key}",
+                "Content-Type": "application/json",
+                "Idempotency-Key": idempotency_key,
+                "User-Agent": USER_AGENT,
+            },
+            json={
+                "from": configured.sender,
+                "to": list(configured.recipients),
+                "subject": subject,
+                "text": body,
+            },
+            timeout=configured.timeout,
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise ResendDeliveryError(f"Resend returned HTTP {exc.response.status_code}") from None
+    except httpx.RequestError as exc:
+        raise ResendDeliveryError(f"Resend request failed: {type(exc).__name__}") from None
+
+
 def send_operational_resend(
     settings: ResendSettings,
     *,
@@ -467,16 +528,146 @@ def _lead_alert_text(query: str, mentions: list[Mention]) -> str:
                     f"• {source} · score {mention.lead_score}/100"
                     + (f" · {mention.lead_category}" if mention.lead_category else ""),
                     f"  {mention.lead_reason or 'No reason supplied.'}",
-                    f"  {excerpt}",
                 ]
             )
+            if mention.conversation:
+                lines.append("  Conversation context:")
+                lines.extend(_conversation_text_lines(mention))
+            else:
+                lines.append(f"  {excerpt}")
             if mention.suggested_reply:
                 lines.append(f"  Draft reply (not sent automatically): {mention.suggested_reply}")
         if mention.url:
-            lines.append(f"  Open: {mention.url}")
+            lines.append(f"  Open root/source: {mention.url}")
     if count > 10:
         lines.append(f"…and {count - 10} more")
     return "\n".join(lines)
+
+
+def _live_test_text(
+    mentions: list[Mention],
+    *,
+    fetched: int,
+    qualified: int,
+    sources: list[str],
+    issues: list[str],
+    run_at: datetime,
+    excluded_mentions: list[Mention],
+) -> str:
+    lines = [
+        "Primovezo Social Radar live delivery test",
+        "",
+        "TEST ONLY. These are real public-source fetch results. No social author was contacted.",
+        f"Scanned at: {run_at.isoformat()}",
+        f"Sources: {', '.join(sources) if sources else 'none'}",
+        f"Fetched: {fetched}",
+        f"Qualified at the configured production threshold: {qualified}",
+        f"Reportable sample after exclusions/context normalization: {len(mentions)}",
+        f"Excluded diagnostic sample: {len(excluded_mentions)}",
+    ]
+    if issues:
+        lines.extend(["", "Operational issues:"])
+        lines.extend(f"- {issue}" for issue in issues[:20])
+
+    if mentions:
+        lines.extend(["", f"Live sample ({min(len(mentions), 10)}):"])
+        for mention in mentions[:10]:
+            lines.extend(_live_sample_lines(mention))
+        if len(mentions) > 10:
+            lines.append(f"…and {len(mentions) - 10} more fetched sample item(s)")
+    else:
+        lines.append("")
+        if fetched:
+            lines.append(
+                "Live posts were fetched, but none remained in the reportable sample after "
+                "author exclusions/context normalization."
+            )
+        else:
+            lines.append("No matching public posts were returned by this live test.")
+
+    if excluded_mentions:
+        lines.extend(
+            [
+                "",
+                f"Excluded diagnostic sample ({min(len(excluded_mentions), 10)}):",
+                "These posts are shown only to verify source/context behavior. "
+                "They remain excluded from production lead classification and delivery.",
+            ]
+        )
+        for mention in excluded_mentions[:10]:
+            lines.extend(_excluded_live_sample_lines(mention))
+        if len(excluded_mentions) > 10:
+            lines.append(f"…and {len(excluded_mentions) - 10} more excluded diagnostic item(s)")
+
+    lines.append("")
+    lines.append("The source-to-Resend delivery path completed successfully.")
+    return "\n".join(lines)
+
+
+def _live_sample_lines(mention: Mention) -> list[str]:
+    excerpt = " ".join(mention.content.split())[:500]
+    source = mention.source
+    if mention.author:
+        source += f" · {mention.author}"
+    score = "unavailable" if mention.lead_score is None else f"{mention.lead_score}/100"
+    relevant = (
+        "unclassified"
+        if mention.lead_relevant is None
+        else ("yes" if mention.lead_relevant else "no")
+    )
+    lines = [
+        "",
+        f"• {source} · query: {mention.query}",
+        f"  AI relevant: {relevant} · score: {score}"
+        + (f" · {mention.lead_category}" if mention.lead_category else ""),
+    ]
+    if mention.lead_reason:
+        lines.append(f"  Reason: {mention.lead_reason}")
+    if mention.conversation:
+        lines.append("  Conversation context:")
+        lines.extend(_conversation_text_lines(mention))
+    else:
+        lines.append(f"  {excerpt}")
+    if mention.url:
+        lines.append(f"  Open root/source: {mention.url}")
+    return lines
+
+
+def _excluded_live_sample_lines(mention: Mention) -> list[str]:
+    excerpt = " ".join(mention.content.split())[:500]
+    source = mention.source
+    if mention.author:
+        source += f" · {mention.author}"
+    lines = [
+        "",
+        f"• {source} · query: {mention.query}",
+        "  Production exclusion: own/team author",
+    ]
+    if mention.conversation:
+        lines.append("  Conversation context:")
+        lines.extend(_conversation_text_lines(mention))
+    else:
+        lines.append(f"  {excerpt}")
+    if mention.url:
+        lines.append(f"  Open root/source: {mention.url}")
+    return lines
+
+
+def _conversation_text_lines(mention: Mention) -> list[str]:
+    lines: list[str] = []
+    for item in mention.conversation[:30]:
+        depth = max(0, min(item.depth, 8))
+        indent = "  " * depth
+        marker = "ROOT" if depth == 0 else "↳"
+        author = f"@{item.author}" if item.author else "unknown author"
+        matched = " [keyword match]" if item.matched else ""
+        excerpt = " ".join(item.text.split())[:420]
+        lines.append(f"    {indent}{marker} {author}{matched}: {excerpt}")
+        if item.url and (depth == 0 or item.matched):
+            lines.append(f"    {indent}Open: {item.url}")
+    if len(mention.conversation) > 30:
+        lines.append(f"    …and {len(mention.conversation) - 30} more conversation post(s)")
+    return lines
 
 
 def _mention_payload(mention: Mention) -> dict:
@@ -496,4 +687,5 @@ def _mention_payload(mention: Mention) -> dict:
         "lead_category": mention.lead_category,
         "lead_reason": mention.lead_reason,
         "suggested_reply": mention.suggested_reply,
+        "conversation": [item.model_dump(mode="json") for item in mention.conversation],
     }

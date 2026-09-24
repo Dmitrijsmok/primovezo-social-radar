@@ -278,6 +278,78 @@ def test_optional_llm_failure_is_reported_without_losing_ingestion(tmp_path, mon
     pipe.close()
 
 
+def test_pipeline_excludes_owned_authors_before_lead_classification(tmp_path, monkeypatch):
+    from harken.sources import REGISTRY
+
+    class FakeSource:
+        def __init__(self, **options):
+            pass
+
+        def fetch(self, query, limit=50):
+            now = datetime.now(timezone.utc)
+            return [
+                Mention(
+                    source="threads",
+                    query=query,
+                    author="dmitry.mokeyev",
+                    text="Mans paša ieraksts par Shopify",
+                    url="https://threads.test/own",
+                    created_at=now,
+                ),
+                Mention(
+                    source="threads",
+                    query=query,
+                    author="prospect.lv",
+                    text="Meklēju Shopify alternatīvu Latvijā",
+                    url="https://threads.test/prospect",
+                    created_at=now,
+                ),
+            ]
+
+    classified = []
+
+    def fake_classify(mentions, provider):
+        classified.extend(mention.author for mention in mentions)
+        for mention in mentions:
+            mention.lead_relevant = True
+            mention.lead_score = 90
+            mention.lead_category = "ecommerce"
+            mention.lead_reason = "Relevant."
+            mention.suggested_reply = "Reply."
+
+    monkeypatch.setitem(REGISTRY, "threads", FakeSource)
+    monkeypatch.setattr("harken.pipeline.classify_leads", fake_classify)
+    monkeypatch.setattr(
+        "harken.pipeline.get_provider",
+        lambda name: type("Provider", (), {"available": True})(),
+    )
+
+    pipe = Pipeline(
+        Config(
+            db_path=str(tmp_path / "excluded-authors.db"),
+            sources=["threads"],
+            lead_enabled=True,
+            lead_llm_provider="openai",
+            lead_excluded_authors=["@Dmitry.Mokeyev"],
+        )
+    )
+    result = pipe.track("Shopify")
+
+    assert result.fetched == 2
+    assert result.new == 2
+    assert classified == ["prospect.lv"]
+    assert result.lead_candidates == 1
+    assert result.lead_candidate_mentions[0].author == "prospect.lv"
+    assert pipe.store.lead_analysis("Shopify", result.lead_candidate_mentions[0].id) is not None
+    own = next(
+        mention
+        for mention in pipe.store.mentions(query="Shopify")
+        if mention.author == "dmitry.mokeyev"
+    )
+    assert pipe.store.lead_analysis("Shopify", own.id) is None
+    pipe.close()
+
+
 def test_lead_http_failure_reports_status_without_response_body(tmp_path, monkeypatch):
     class FailingProvider:
         available = True

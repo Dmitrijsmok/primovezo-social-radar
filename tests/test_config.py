@@ -78,6 +78,14 @@ def test_blank_env_vars_fall_back_to_defaults(monkeypatch):
     assert cfg.auth_mode == "none"
 
 
+def test_partial_bluesky_authenticated_fallback_is_rejected(monkeypatch):
+    monkeypatch.setenv("HARKEN_BLUESKY_IDENTIFIER", "radar.bsky.social")
+    monkeypatch.delenv("HARKEN_BLUESKY_APP_PASSWORD", raising=False)
+
+    with pytest.raises(ValueError, match="HARKEN_BLUESKY_IDENTIFIER"):
+        config.Config()
+
+
 def test_webhook_url_is_loaded(monkeypatch):
     monkeypatch.setenv("HARKEN_WEBHOOK_URL", "https://alerts.example.test/harken")
     assert config.Config().webhook_url == "https://alerts.example.test/harken"
@@ -101,6 +109,9 @@ def test_account_auth_settings_are_loaded(monkeypatch):
 
 def test_keyed_source_credentials_are_loaded_and_routed(monkeypatch):
     monkeypatch.setenv("HARKEN_BLUESKY_LANG", "lv")
+    monkeypatch.setenv("HARKEN_BLUESKY_IDENTIFIER", "radar.bsky.social")
+    monkeypatch.setenv("HARKEN_BLUESKY_APP_PASSWORD", "app-pass")
+    monkeypatch.setenv("HARKEN_BLUESKY_PDS", "https://bsky.social/")
     monkeypatch.setenv("HARKEN_X_BEARER_TOKEN", "x-token")
     monkeypatch.setenv("HARKEN_YOUTUBE_API_KEY", "youtube-key")
     monkeypatch.setenv("HARKEN_MASTODON_INSTANCE", "mastodon.social")
@@ -114,7 +125,12 @@ def test_keyed_source_credentials_are_loaded_and_routed(monkeypatch):
 
     cfg = config.Config()
 
-    assert cfg.source_options("bluesky") == {"lang": "lv"}
+    assert cfg.source_options("bluesky") == {
+        "lang": "lv",
+        "identifier": "radar.bsky.social",
+        "app_password": "app-pass",
+        "pds": "https://bsky.social",
+    }
     assert cfg.source_options("x") == {"bearer_token": "x-token"}
     assert cfg.source_options("youtube") == {"api_key": "youtube-key"}
     assert cfg.source_options("mastodon") == {
@@ -160,6 +176,17 @@ def test_llm_sentiment_is_explicitly_opt_in(monkeypatch):
 def test_lead_fallback_alerts_can_be_disabled(monkeypatch):
     monkeypatch.setenv("HARKEN_LEAD_FALLBACK_ALERTS", "false")
     assert config.Config().lead_fallback_alerts is False
+
+
+def test_lead_excluded_authors_are_casefolded_at_match_time(monkeypatch):
+    monkeypatch.setenv("HARKEN_LEAD_EXCLUDED_AUTHORS", " @Dmitry.Mokeyev , primovezo ")
+    cfg = config.Config()
+
+    assert cfg.lead_excluded_authors == ["@Dmitry.Mokeyev", "primovezo"]
+    assert cfg.is_lead_author_excluded("dmitry.mokeyev")
+    assert cfg.is_lead_author_excluded("@DMITRY.MOKEYEV")
+    assert cfg.is_lead_author_excluded("Primovezo")
+    assert not cfg.is_lead_author_excluded("prospect.lv")
 
 
 def test_partial_email_configuration_is_rejected(monkeypatch):
