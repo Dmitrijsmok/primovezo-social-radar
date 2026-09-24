@@ -71,10 +71,8 @@ console = Console()
 PRIMOVEZO_ALLOWED_SOURCES = {
     "bluesky",
     "instagram",
-    "mastodon",
     "threads",
     "x",
-    "youtube",
 }
 
 
@@ -119,10 +117,6 @@ def _primovezo_auto_sources(cfg: Config) -> list[str]:
         sources.append("threads")
     if cfg.x_bearer_token:
         sources.append("x")
-    if cfg.youtube_api_key:
-        sources.append("youtube")
-    if cfg.mastodon_access_token:
-        sources.append("mastodon")
     if cfg.instagram_access_token and cfg.instagram_user_id:
         sources.append("instagram")
     return sources
@@ -134,11 +128,6 @@ def _apply_primovezo_source_locales(cfg: Config) -> None:
         cfg.bluesky_lang = "lv"
     if "x" in cfg.sources:
         cfg.x_lang = "lv"
-    if "youtube" in cfg.sources:
-        cfg.youtube_relevance_language = "lv"
-        cfg.youtube_region_code = "LV"
-    if "mastodon" in cfg.sources:
-        cfg.mastodon_lang = "lv"
 
 
 @threads_app.command("status")
@@ -192,16 +181,6 @@ def primovezo_source_status():
             "x",
             bool(cfg.x_bearer_token),
             "recent search · lang:lv · reposts excluded",
-        ),
-        (
-            "youtube",
-            bool(cfg.youtube_api_key),
-            "video search · relevanceLanguage=lv · regionCode=LV",
-        ),
-        (
-            "mastodon",
-            bool(cfg.mastodon_access_token),
-            f"{cfg.mastodon_instance} · instance-dependent full-text search",
         ),
         (
             "instagram",
@@ -422,7 +401,7 @@ def leads_primovezo(
         None,
         help=(
             "Comma-separated sources. Default: Bluesky plus any configured "
-            "Threads, X, YouTube, Mastodon, and Instagram sources."
+            "Threads, X, and Instagram sources."
         ),
     ),
     limit: int = typer.Option(50, min=1, max=100, help="Max items per source and keyword."),
