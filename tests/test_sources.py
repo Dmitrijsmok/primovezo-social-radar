@@ -173,7 +173,67 @@ def test_bluesky_fails_over_to_api_appview_on_forbidden():
 
 
 @respx.mock
-def test_bluesky_raises_when_both_appviews_forbid_search():
+def test_bluesky_uses_authenticated_pds_proxy_when_both_public_appviews_forbid():
+    BlueskySource._session_cache.clear()
+    public = respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(403)
+    )
+    alternate = respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(403)
+    )
+    login = respx.post("https://bsky.social/xrpc/com.atproto.server.createSession").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "accessJwt": "access-jwt",
+                "refreshJwt": "refresh-jwt",
+                "handle": "radar.bsky.social",
+                "did": "did:plc:radar",
+            },
+        )
+    )
+    proxied = respx.get("https://bsky.social/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "posts": [
+                    {
+                        "uri": "at://did:plc:abc/app.bsky.feed.post/proxied",
+                        "author": {"handle": "prospect.bsky.social"},
+                        "record": {
+                            "text": "Meklēju Shopify alternatīvu",
+                            "createdAt": "2026-09-24T10:00:00Z",
+                        },
+                    }
+                ]
+            },
+        )
+    )
+
+    out = BlueskySource(
+        lang="lv",
+        identifier="radar.bsky.social",
+        app_password="app-password-secret",
+    ).fetch("Shopify")
+
+    assert public.called and alternate.called and login.called and proxied.called
+    login_payload = json.loads(login.calls[0].request.content)
+    assert login_payload == {
+        "identifier": "radar.bsky.social",
+        "password": "app-password-secret",
+    }
+    proxy_request = proxied.calls[0].request
+    assert proxy_request.headers["authorization"] == "Bearer access-jwt"
+    assert proxy_request.headers["atproto-proxy"] == "did:web:api.bsky.app#bsky_appview"
+    assert proxy_request.url.params["q"] == "Shopify"
+    assert proxy_request.url.params["lang"] == "lv"
+    assert len(out) == 1
+    assert out[0].author == "prospect.bsky.social"
+
+
+@respx.mock
+def test_bluesky_public_block_without_auth_has_actionable_sanitized_error():
+    BlueskySource._session_cache.clear()
     respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
         return_value=httpx.Response(403)
     )
@@ -181,8 +241,44 @@ def test_bluesky_raises_when_both_appviews_forbid_search():
         return_value=httpx.Response(403)
     )
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(RuntimeError, match="HARKEN_BLUESKY_APP_PASSWORD") as exc:
         BlueskySource().fetch("acme")
+
+    assert "403" not in str(exc.value)
+
+
+@respx.mock
+def test_bluesky_authenticated_proxy_relogs_once_after_expired_session():
+    BlueskySource._session_cache.clear()
+    respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(403)
+    )
+    respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(403)
+    )
+    login = respx.post("https://bsky.social/xrpc/com.atproto.server.createSession").mock(
+        side_effect=[
+            httpx.Response(200, json={"accessJwt": "old-jwt"}),
+            httpx.Response(200, json={"accessJwt": "new-jwt"}),
+        ]
+    )
+    proxied = respx.get("https://bsky.social/xrpc/app.bsky.feed.searchPosts").mock(
+        side_effect=[
+            httpx.Response(401),
+            httpx.Response(200, json={"posts": []}),
+        ]
+    )
+
+    out = BlueskySource(
+        identifier="radar.bsky.social",
+        app_password="app-password-secret",
+    ).fetch("Shopify")
+
+    assert out == []
+    assert login.call_count == 2
+    assert proxied.call_count == 2
+    assert proxied.calls[0].request.headers["authorization"] == "Bearer old-jwt"
+    assert proxied.calls[1].request.headers["authorization"] == "Bearer new-jwt"
 
 
 @respx.mock
