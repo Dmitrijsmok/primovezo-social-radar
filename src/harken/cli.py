@@ -79,9 +79,11 @@ PRIMOVEZO_ALLOWED_SOURCES = {
 
 PRIMOVEZO_LIVE_TEST_QUERIES = (
     "interneta veikals",
+    "interneta veikala platforma",
     "e-komercija",
     "Shopify",
     "WooCommerce",
+    "Mozello",
     "pārdot internetā",
 )
 
@@ -107,11 +109,19 @@ def _prepare_primovezo_threads(cfg: Config) -> str | None:
             else "unknown"
         )
         console.print(f"[green]✓[/green] Threads token auto-refreshed; new expiry: {expires}")
-        return None
+
+    issues: list[str] = []
     if maintenance.refresh_error:
-        message = (
+        issues.append(
             f"Threads token refresh failed; current valid token kept: {maintenance.refresh_error}"
         )
+    if "threads_read_replies" not in maintenance.info.scopes:
+        issues.append(
+            "Threads token is missing threads_read_replies permission; "
+            "reply/root conversation hierarchy is unavailable"
+        )
+    if issues:
+        message = "; ".join(issues)
         console.print(f"[yellow]![/yellow] {message}")
         return message
     return None
@@ -156,8 +166,10 @@ def threads_status():
         remaining = f"{max(0, (info.expires_at - now).total_seconds() / 86400):.1f} days"
 
     keyword = "available" if "threads_keyword_search" in info.scopes else "missing"
+    replies = "available" if "threads_read_replies" in info.scopes else "missing"
     console.print("Threads API: connected")
     console.print(f"keyword_search: {keyword}")
+    console.print(f"read_replies: {replies}")
     console.print(f"Token expires: {expiry}")
     console.print(f"Remaining: {remaining}")
     console.print("Auto-refresh: enabled when fewer than 14 days remain")
@@ -178,7 +190,7 @@ def primovezo_source_status():
         (
             "threads",
             bool(cfg.threads_access_token),
-            "keyword search · strict Latvian classifier",
+            "keyword search · reply/root context when threads_read_replies is granted",
         ),
         (
             "instagram",
@@ -322,6 +334,7 @@ def primovezo_live_email_test(
                         mention.lead_category = analysis["category"]
                         mention.lead_reason = analysis["reason"]
                         mention.suggested_reply = analysis["suggested_reply"]
+                        mention.conversation = analysis["conversation"]
                     key = (mention.source, mention.id)
                     existing = sample_by_key.get(key)
                     if existing is None or (mention.lead_score or -1) > (existing.lead_score or -1):
