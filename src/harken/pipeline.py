@@ -206,6 +206,12 @@ class Pipeline:
             }.values()
         )
         lead_mentions = collected if classify_fetched else new_mentions
+        if self.config.lead_excluded_authors:
+            lead_mentions = [
+                mention
+                for mention in lead_mentions
+                if not self.config.is_lead_author_excluded(mention.author)
+            ]
 
         if self.config.lead_enabled:
             # Normal incremental scans classify only newly discovered mentions.
