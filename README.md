@@ -230,9 +230,18 @@ setup, new qualified leads are delivered through Resend to `HARKEN_RESEND_TO`, f
 For the production user-level systemd timer, Resend test, logs, and enable/disable
 commands, see [docs/primovezo-production.md](docs/primovezo-production.md).
 
-Threads uses Meta's official keyword-search API and requires a user access token
-with the `threads_keyword_search` permission. The access token is sent in the
-Authorization header rather than the query string.
+Threads uses Meta's official keyword-search API and requires a long-lived user
+access token with the `threads_keyword_search` permission. Before Primovezo scans,
+Harken checks the token health. When fewer than 14 days remain, it refreshes the
+long-lived token automatically and atomically replaces only
+`HARKEN_THREADS_ACCESS_TOKEN` in the local `.env`. A refresh failure keeps the
+still-valid token in use and is retried on the next scheduled run.
+
+Inspect the connection without printing the token:
+
+```bash
+harken threads status
+```
 
 ### Keep listening
 
