@@ -95,14 +95,11 @@ def _prepare_primovezo_threads(cfg: Config) -> str | None:
             if maintenance.info.expires_at
             else "unknown"
         )
-        console.print(
-            f"[green]✓[/green] Threads token auto-refreshed; new expiry: {expires}"
-        )
+        console.print(f"[green]✓[/green] Threads token auto-refreshed; new expiry: {expires}")
         return None
     if maintenance.refresh_error:
         message = (
-            "Threads token refresh failed; current valid token kept: "
-            f"{maintenance.refresh_error}"
+            f"Threads token refresh failed; current valid token kept: {maintenance.refresh_error}"
         )
         console.print(f"[yellow]![/yellow] {message}")
         return message
@@ -180,9 +177,7 @@ def primovezo_source_status():
     ]
     for source, configured, notes in rows:
         status = (
-            "[green]enabled[/green]"
-            if source in enabled and configured
-            else "[dim]disabled[/dim]"
+            "[green]enabled[/green]" if source in enabled and configured else "[dim]disabled[/dim]"
         )
         if source == "bluesky":
             status = "[green]enabled[/green]"
@@ -413,9 +408,7 @@ def leads_primovezo(
     """Scan the built-in Primovezo Latvian commercial-intent keyword profile."""
     base_cfg = Config()
     requested_sources = (
-        {name.strip().lower() for name in sources.split(",") if name.strip()}
-        if sources
-        else None
+        {name.strip().lower() for name in sources.split(",") if name.strip()} if sources else None
     )
     operational_issues: list[str] = []
     if requested_sources is None or "threads" in requested_sources:
@@ -486,9 +479,7 @@ def leads_primovezo(
         )
     )
     if "threads" not in cfg.sources and not cfg.threads_access_token:
-        console.print(
-            "[dim]Threads disabled: HARKEN_THREADS_ACCESS_TOKEN is not configured.[/dim]"
-        )
+        console.print("[dim]Threads disabled: HARKEN_THREADS_ACCESS_TOKEN is not configured.[/dim]")
     if digest_resend is None and digest_email is None:
         console.print(
             "[yellow]![/yellow] No internal Resend/SMTP delivery configured; "
@@ -523,9 +514,7 @@ def leads_primovezo(
             else:
                 for source, err in result.errors.items():
                     console.print(f"  [yellow]![/yellow] {source}: {err}")
-                    operational_issues.append(
-                        f"{source} fetch failed for {query!r}: {err}"
-                    )
+                    operational_issues.append(f"{source} fetch failed for {query!r}: {err}")
                 _print_retries(result)
 
                 source_count = len({name for name in active_cfg.sources if name.strip()})
@@ -594,9 +583,7 @@ def leads_primovezo(
                 except Exception as exc:
                     digest_error = f"{type(exc).__name__}: {exc}"
                     for query, ids in grouped.items():
-                        pipe.store.mark_alerts_failed(
-                            query, ids, digest_target_key, digest_error
-                        )
+                        pipe.store.mark_alerts_failed(query, ids, digest_target_key, digest_error)
                 else:
                     for query, ids in grouped.items():
                         pipe.store.mark_alerts_delivered(query, ids, digest_target_key)
@@ -740,9 +727,7 @@ def leads_recent(
         )
     )
     if "threads" not in cfg.sources:
-        console.print(
-            "[dim]Threads disabled: HARKEN_THREADS_ACCESS_TOKEN is not configured.[/dim]"
-        )
+        console.print("[dim]Threads disabled: HARKEN_THREADS_ACCESS_TOKEN is not configured.[/dim]")
 
     total_fetched = 0
     total_new = 0
@@ -768,9 +753,7 @@ def leads_recent(
             if result.errors:
                 failed_keywords += 1
             if result.lead_analysis_error:
-                console.print(
-                    f"  [yellow]![/yellow] lead classifier: {result.lead_analysis_error}"
-                )
+                console.print(f"  [yellow]![/yellow] lead classifier: {result.lead_analysis_error}")
             console.print(
                 f"  {result.fetched} fetched · {result.new} new · "
                 f"{result.lead_candidates} qualified"
@@ -803,8 +786,7 @@ def leads_report(
     """Show de-duplicated qualified ecommerce leads across all tracked keywords."""
     active_queries = list(
         dict.fromkeys(
-            query
-            for _, query in (*PRIMOVEZO_LEAD_KEYWORDS, *PRIMOVEZO_DISCOVERY_KEYWORDS)
+            query for _, query in (*PRIMOVEZO_LEAD_KEYWORDS, *PRIMOVEZO_DISCOVERY_KEYWORDS)
         )
     )
     with Store(db or Config().db_path) as store:
@@ -1378,9 +1360,7 @@ def test_alert(
     webhook_url: str = typer.Option(
         None, "--webhook-url", help="Override HARKEN_WEBHOOK_URL for this test."
     ),
-    transport: str = typer.Option(
-        None, help="Delivery transport: webhook, email, or resend."
-    ),
+    transport: str = typer.Option(None, help="Delivery transport: webhook, email, or resend."),
     kind: str = typer.Option(
         "negative", help="Synthetic event: negative, lead, operational, volume, or sentiment."
     ),
