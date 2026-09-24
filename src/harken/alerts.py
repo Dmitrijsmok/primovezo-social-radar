@@ -264,6 +264,81 @@ def send_lead_digest_resend(settings: ResendSettings, mentions: list[Mention]) -
         ) from None
 
 
+def send_operational_resend(
+    settings: ResendSettings,
+    *,
+    issues: list[str],
+    run_label: str = "daily scan",
+) -> None:
+    """Send one internal operational warning for a Primovezo radar run."""
+    cleaned = [issue.strip() for issue in issues if issue and issue.strip()]
+    if not cleaned:
+        return
+
+    configured = settings.validated()
+    subject = f"[Primovezo Social Radar] Operational warning: {_safe_header(run_label)}"
+    lines = [
+        "Primovezo Social Radar completed with an operational problem.",
+        "",
+        f"Run: {run_label}",
+        f"Issues: {len(cleaned)}",
+        "",
+    ]
+    lines.extend(f"• {issue}" for issue in cleaned[:20])
+    if len(cleaned) > 20:
+        lines.append(f"…and {len(cleaned) - 20} more issue(s)")
+    lines.extend(
+        [
+            "",
+            "The lead scan may be incomplete.",
+            "Check: journalctl --user -u primovezo-social-radar.service -n 100 --no-pager",
+        ]
+    )
+    body = "\n".join(lines)
+    digest_identity = "|".join(cleaned)
+    idempotency_key = (
+        "primovezo-ops-warning/"
+        + hashlib.sha256(
+            (
+                configured.sender
+                + "|"
+                + ",".join(sorted(configured.recipients, key=str.casefold))
+                + "|"
+                + run_label
+                + "|"
+                + digest_identity
+            ).encode("utf-8")
+        ).hexdigest()[:48]
+    )
+
+    try:
+        response = httpx.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {configured.api_key}",
+                "Content-Type": "application/json",
+                "Idempotency-Key": idempotency_key,
+                "User-Agent": USER_AGENT,
+            },
+            json={
+                "from": configured.sender,
+                "to": list(configured.recipients),
+                "subject": subject,
+                "text": body,
+            },
+            timeout=configured.timeout,
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise ResendDeliveryError(
+            f"Resend returned HTTP {exc.response.status_code}"
+        ) from None
+    except httpx.RequestError as exc:
+        raise ResendDeliveryError(
+            f"Resend request failed: {type(exc).__name__}"
+        ) from None
+
+
 def send_threshold_email(settings: EmailSettings, text: str, payload: dict) -> None:
     """Deliver a persisted volume/sentiment threshold episode by email."""
     event = str(payload.get("event", "harken.threshold_alert")).removeprefix("harken.")
