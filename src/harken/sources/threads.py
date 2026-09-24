@@ -63,7 +63,7 @@ class ThreadsSource(Source):
             # Older/limited keyword-search surfaces may reject reply-only
             # relationship fields. Keep keyword discovery working and simply
             # fall back to a context-free result in that case.
-            if response.status_code == 400:
+            if response.status_code in {400, 403}:
                 params["fields"] = _BASIC_FIELDS
                 response = client.get(_API, params=params)
             response.raise_for_status()
