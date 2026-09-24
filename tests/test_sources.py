@@ -173,7 +173,7 @@ def test_bluesky_fails_over_to_api_appview_on_forbidden():
 
 
 @respx.mock
-def test_bluesky_uses_authenticated_pds_proxy_when_both_public_appviews_forbid():
+def test_bluesky_uses_authenticated_pds_proxy_without_probing_public_appviews():
     BlueskySource._session_cache.clear()
     public = respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
         return_value=httpx.Response(403)
@@ -216,7 +216,8 @@ def test_bluesky_uses_authenticated_pds_proxy_when_both_public_appviews_forbid()
         app_password="app-password-secret",
     ).fetch("Shopify")
 
-    assert public.called and alternate.called and login.called and proxied.called
+    assert not public.called and not alternate.called
+    assert login.called and proxied.called
     login_payload = json.loads(login.calls[0].request.content)
     assert login_payload == {
         "identifier": "radar.bsky.social",
@@ -250,12 +251,6 @@ def test_bluesky_public_block_without_auth_has_actionable_sanitized_error():
 @respx.mock
 def test_bluesky_authenticated_proxy_relogs_once_after_expired_session():
     BlueskySource._session_cache.clear()
-    respx.get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
-        return_value=httpx.Response(403)
-    )
-    respx.get("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts").mock(
-        return_value=httpx.Response(403)
-    )
     login = respx.post("https://bsky.social/xrpc/com.atproto.server.createSession").mock(
         side_effect=[
             httpx.Response(200, json={"accessJwt": "old-jwt"}),
