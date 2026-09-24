@@ -169,8 +169,19 @@ class Config:
     x_bearer_token: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_X_BEARER_TOKEN") or None
     )
+    x_lang: str | None = field(
+        default_factory=lambda: (os.getenv("HARKEN_X_LANG") or "").strip() or None
+    )
     youtube_api_key: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_YOUTUBE_API_KEY") or None
+    )
+    youtube_relevance_language: str | None = field(
+        default_factory=lambda: (os.getenv("HARKEN_YOUTUBE_RELEVANCE_LANGUAGE") or "").strip()
+        or None
+    )
+    youtube_region_code: str | None = field(
+        default_factory=lambda: (os.getenv("HARKEN_YOUTUBE_REGION_CODE") or "").strip().upper()
+        or None
     )
     threads_access_token: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_THREADS_ACCESS_TOKEN") or None
@@ -284,9 +295,16 @@ class Config:
         if name == "rss":
             return {"feeds": self.rss_feeds}
         if name == "x":
-            return {"bearer_token": self.x_bearer_token}
+            return {
+                "bearer_token": self.x_bearer_token,
+                "lang": self.x_lang,
+            }
         if name == "youtube":
-            return {"api_key": self.youtube_api_key}
+            return {
+                "api_key": self.youtube_api_key,
+                "relevance_language": self.youtube_relevance_language,
+                "region_code": self.youtube_region_code,
+            }
         if name == "threads":
             return {"access_token": self.threads_access_token}
         return {}
