@@ -61,7 +61,8 @@ class Source:
     # -- helpers -------------------------------------------------------------
     def _client(self, **kwargs) -> httpx.Client:
         headers = {"User-Agent": USER_AGENT, **kwargs.pop("headers", {})}
-        return httpx.Client(headers=headers, timeout=15.0, **kwargs)
+        timeout = kwargs.pop("timeout", 15.0)
+        return httpx.Client(headers=headers, timeout=timeout, **kwargs)
 
 
 def strip_html(value: str) -> str:
