@@ -868,6 +868,32 @@ def test_alert_command_can_send_synthetic_lead_with_resend(monkeypatch):
     assert "resend test delivered" in result.output
 
 
+def test_alert_command_can_send_synthetic_operational_warning_with_resend(monkeypatch):
+    monkeypatch.setenv("HARKEN_RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("HARKEN_RESEND_FROM", "noreply@primovezo.com")
+    monkeypatch.setenv("HARKEN_RESEND_TO", "owner@example.test")
+    delivered = []
+    monkeypatch.setattr(
+        cli,
+        "send_operational_resend",
+        lambda settings, *, issues, run_label: delivered.append(
+            (settings, list(issues), run_label)
+        ),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["test-alert", "--transport", "resend", "--kind", "operational"],
+    )
+
+    assert result.exit_code == 0, result.output
+    settings, issues, run_label = delivered[0]
+    assert settings.recipients == ("owner@example.test",)
+    assert run_label == "synthetic alert test"
+    assert any("Synthetic operational warning" in issue for issue in issues)
+    assert "resend test delivered" in result.output
+
+
 def test_version_flag():
     result = runner.invoke(cli.app, ["--version"])
     assert result.exit_code == 0
