@@ -9,10 +9,10 @@ import respx
 from harken.sources.bluesky import BlueskySource
 from harken.sources.hackernews import HackerNewsSource
 from harken.sources.instagram import InstagramSource
-from harken.sources.mastodon import MastodonSource
 from harken.sources.reddit import RedditSource
 from harken.sources.stackoverflow import StackOverflowSource
 from harken.sources.threads import ThreadsSource
+from harken.sources.tiktok import TikTokSource
 from harken.sources.x import XSource
 from harken.sources.youtube import YouTubeSource
 
@@ -350,21 +350,6 @@ def test_instagram_caches_hashtag_id_across_pages():
 
 
 @respx.mock
-def test_youtube_can_bias_results_to_latvia_and_latvian():
-    route = respx.get("https://www.googleapis.com/youtube/v3/search").mock(
-        return_value=httpx.Response(200, json={"items": []})
-    )
-    YouTubeSource(
-        api_key="secret-key",
-        relevance_language="lv",
-        region_code="lv",
-    ).fetch("Shopify", limit=10)
-    params = route.calls[0].request.url.params
-    assert params["relevanceLanguage"] == "lv"
-    assert params["regionCode"] == "LV"
-
-
-@respx.mock
 def test_threads_parses_keyword_search_and_pagination():
     route = respx.get("https://graph.threads.net/keyword_search").mock(
         return_value=httpx.Response(
@@ -457,49 +442,82 @@ def test_x_can_filter_primovezo_searches_to_latvian_and_exclude_reposts():
 
 
 @respx.mock
-def test_mastodon_filters_recent_results_by_language_and_window():
-    route = respx.get("https://mastodon.social/api/v2/search").mock(
+def test_tiktok_uses_apify_keyword_video_search_with_lv_proxy_and_local_since_filter():
+    route = respx.post(
+        "https://api.apify.com/v2/actors/clockworks~tiktok-scraper/"
+        "run-sync-get-dataset-items"
+    ).mock(
         return_value=httpx.Response(
             200,
-            json={
-                "statuses": [
-                    {
-                        "id": "new-lv",
-                        "created_at": "2026-09-23T10:00:00Z",
-                        "language": "lv",
-                        "content": "<p>Shopify alternatīva</p>",
-                        "url": "https://mastodon.social/@alice/1",
-                        "account": {"acct": "alice"},
-                    },
-                    {
-                        "id": "new-en",
-                        "created_at": "2026-09-23T11:00:00Z",
-                        "language": "en",
-                        "content": "<p>Shopify alternative</p>",
-                        "url": "https://mastodon.social/@bob/2",
-                        "account": {"acct": "bob"},
-                    },
-                    {
-                        "id": "old-lv",
-                        "created_at": "2026-09-18T10:00:00Z",
-                        "language": "lv",
-                        "content": "<p>Vecs ieraksts</p>",
-                        "url": "https://mastodon.social/@carol/3",
-                        "account": {"acct": "carol"},
-                    },
-                ]
-            },
+            json=[
+                {
+                    "id": "new",
+                    "text": "Vai Shopify ir tā vērts Latvijā?",
+                    "textLanguage": "lv",
+                    "createTimeISO": "2026-09-23T10:00:00.000Z",
+                    "authorMeta": {"name": "alice", "nickName": "Alice"},
+                    "webVideoUrl": "https://www.tiktok.com/@alice/video/new",
+                    "diggCount": 17,
+                },
+                {
+                    "id": "old",
+                    "text": "Vecs video",
+                    "createTimeISO": "2026-09-18T10:00:00.000Z",
+                    "authorMeta": {"name": "bob"},
+                    "webVideoUrl": "https://www.tiktok.com/@bob/video/old",
+                },
+            ],
         )
     )
-    since = datetime(2026, 9, 20, tzinfo=timezone.utc)
-    page = MastodonSource(
-        instance="mastodon.social",
-        access_token="mastodon-token",
-        lang="lv",
-    ).fetch_page("Shopify", since=since)
+
+    page = TikTokSource(
+        apify_token="apify-secret",
+        max_results=15,
+        proxy_country="lv",
+    ).fetch_page(
+        "Shopify",
+        limit=50,
+        since=datetime(2026, 9, 20, tzinfo=timezone.utc),
+    )
+
     request = route.calls[0].request
-    assert request.headers["authorization"] == "Bearer mastodon-token"
-    assert [mention.author for mention in page.mentions] == ["alice"]
+    assert request.headers["authorization"] == "Bearer apify-secret"
+    assert "apify-secret" not in str(request.url)
+    payload = request.read().decode()
+    assert '"searchQueries":["Shopify"]' in payload
+    assert '"searchSection":"/video"' in payload
+    assert '"resultsPerPage":15' in payload
+    assert '"proxyCountryCode":"LV"' in payload
+    assert '"videoSearchSorting":"LATEST"' in payload
+    assert len(page.mentions) == 1
+    assert page.mentions[0].source == "tiktok"
+    assert page.mentions[0].author == "alice"
+    assert page.mentions[0].score == 17
+    assert page.mentions[0].url == "https://www.tiktok.com/@alice/video/new"
+
+
+@respx.mock
+def test_tiktok_skips_apify_error_items_and_fabricates_url_only_with_author_and_id():
+    respx.post(
+        "https://api.apify.com/v2/actors/clockworks~tiktok-scraper/"
+        "run-sync-get-dataset-items"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"errorCode": "SEARCH_QUERY_NOT_FOUND", "error": "No videos"},
+                {
+                    "id": "123",
+                    "text": "E-komercija",
+                    "createTime": 1_700_000_000,
+                    "authorMeta": {"name": "alice"},
+                },
+            ],
+        )
+    )
+    page = TikTokSource(apify_token="token").fetch_page("e-komercija")
+    assert len(page.mentions) == 1
+    assert page.mentions[0].url == "https://www.tiktok.com/@alice/video/123"
 
 
 @pytest.mark.parametrize(
@@ -508,6 +526,7 @@ def test_mastodon_filters_recent_results_by_language_and_window():
         (YouTubeSource(), "HARKEN_YOUTUBE_API_KEY"),
         (XSource(), "HARKEN_X_BEARER_TOKEN"),
         (InstagramSource(), "HARKEN_INSTAGRAM_ACCESS_TOKEN"),
+        (TikTokSource(), "HARKEN_TIKTOK_APIFY_TOKEN"),
     ],
 )
 def test_keyed_sources_fail_before_network_without_credentials(source, message):
