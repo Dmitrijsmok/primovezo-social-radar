@@ -349,6 +349,54 @@ def test_live_test_resend_renders_threads_conversation_hierarchy():
 
 
 @respx.mock
+def test_live_test_resend_shows_excluded_mentions_only_as_diagnostics():
+    route = respx.post("https://api.resend.com/emails").mock(
+        return_value=httpx.Response(200, json={"id": "email_excluded_diag"})
+    )
+    settings = ResendSettings(
+        api_key="re_test_secret",
+        sender="noreply@primovezo.com",
+        recipients=("owner@example.test",),
+    )
+    excluded = Mention(
+        source="threads",
+        query="Shopify",
+        author="dmitry.mokeyev",
+        text="Mans paša reply",
+        url="https://threads.test/own-reply",
+        created_at=datetime(2026, 9, 24, 9, 0, tzinfo=timezone.utc),
+        conversation=[
+            ConversationPost(
+                id="own-reply",
+                author="dmitry.mokeyev",
+                text="Mans paša reply",
+                url="https://threads.test/own-reply",
+                created_at=datetime(2026, 9, 24, 9, 0, tzinfo=timezone.utc),
+                depth=0,
+                matched=True,
+            )
+        ],
+    )
+
+    send_live_test_resend(
+        settings,
+        [],
+        fetched=1,
+        qualified=0,
+        sources=["threads"],
+        excluded_mentions=[excluded],
+    )
+
+    payload = json.loads(route.calls[0].request.content)
+    body = payload["text"]
+    assert "Excluded diagnostic sample: 1" in body
+    assert "Production exclusion: own/team author" in body
+    assert "@dmitry.mokeyev [keyword match]" in body
+    assert "remain excluded from production lead classification and delivery" in body
+    assert "AI relevant: yes" not in body
+
+
+@respx.mock
 def test_operational_resend_sends_one_internal_warning_without_secrets():
     route = respx.post("https://api.resend.com/emails").mock(
         return_value=httpx.Response(200, json={"id": "email_ops"})
