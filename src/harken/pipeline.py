@@ -111,7 +111,9 @@ class Pipeline:
         if backfill and since_override is not None:
             raise ValueError("backfill and since_override cannot be used together")
         track_started = time.perf_counter()
-        mode = "window" if since_override is not None else ("backfill" if backfill else "incremental")
+        mode = (
+            "window" if since_override is not None else ("backfill" if backfill else "incremental")
+        )
         result = TrackResult(query=query, project_id=project_id, mode=mode)
         collected: list[Mention] = []
         successful: dict[str, tuple[list[Mention], str | None, datetime | None]] = {}

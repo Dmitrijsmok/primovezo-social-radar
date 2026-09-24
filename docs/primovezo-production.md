@@ -63,8 +63,34 @@ Threads is included automatically when this is present in the local `.env`:
 HARKEN_THREADS_ACCESS_TOKEN=<token>
 ```
 
-Without that variable, Primovezo continues with Bluesky only and prints that Threads
-is disabled.
+Without that variable, Threads stays disabled. Primovezo always keeps Bluesky
+enabled and also auto-enables Instagram when its official Meta credentials are present:
+
+```dotenv
+HARKEN_INSTAGRAM_ACCESS_TOKEN=<instagram-user-token>
+HARKEN_INSTAGRAM_USER_ID=<instagram-professional-user-id>
+```
+
+Instagram uses Meta's hashtag-search surface, normalizing each radar phrase into a hashtag
+candidate and then reading recent public media. Meta limits hashtag discovery and requires
+Facebook Login with a professional Instagram account, so Instagram remains disabled until
+both its access token and IG user id are configured.
+
+X and TikTok are deliberately outside the Primovezo commercial lead runner. X remains a
+generic Harken adapter for operators who already have suitable API access. TikTok uses only
+the official Research API and requires an approved non-commercial Research Tools project:
+
+```dotenv
+HARKEN_TIKTOK_CLIENT_KEY=<research-client-key>
+HARKEN_TIKTOK_CLIENT_SECRET=<research-client-secret>
+HARKEN_TIKTOK_REGION_CODE=LV
+```
+
+With approved research credentials, use generic Harken tracking for ecommerce content
+analysis, for example `uv run harken track "e-komercija" --sources tiktok`. The adapter
+requests captions, engagement metadata, and available `voice_to_text`. TikTok's keyword
+condition searches the video description, so spoken text enriches analysis but does not by
+itself make a video discoverable.
 
 Use a **long-lived** Threads token. Before every Primovezo daily/recent scan, Harken
 checks its validity, `threads_keyword_search` scope, and expiry. If fewer than 14 days
@@ -73,9 +99,10 @@ remain, Harken calls the Threads refresh endpoint and atomically updates only
 remains in use if a refresh attempt fails while it is still valid, so the next daily
 run can retry.
 
-Check token health at any time without exposing the secret:
+Check configured social sources and Threads token health without exposing secrets:
 
 ```bash
+harken leads source-status
 harken threads status
 ```
 

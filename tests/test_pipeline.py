@@ -154,9 +154,7 @@ def test_backfill_cursor_survives_restart_and_completes(tmp_path, monkeypatch):
     pipe.close()
 
 
-def test_window_scan_uses_explicit_since_and_does_not_move_incremental_state(
-    tmp_path, monkeypatch
-):
+def test_window_scan_uses_explicit_since_and_does_not_move_incremental_state(tmp_path, monkeypatch):
     from harken.sources import REGISTRY
     from harken.sources.base import FetchPage
 

@@ -58,14 +58,10 @@ def inspect_threads_token(
                 params={"input_token": token},
             )
     except httpx.HTTPError as exc:
-        raise ThreadsAuthError(
-            f"Threads token inspection failed: {type(exc).__name__}"
-        ) from None
+        raise ThreadsAuthError(f"Threads token inspection failed: {type(exc).__name__}") from None
 
     if response.status_code != 200:
-        raise ThreadsAuthError(
-            f"Threads token inspection failed with HTTP {response.status_code}"
-        )
+        raise ThreadsAuthError(f"Threads token inspection failed with HTTP {response.status_code}")
 
     try:
         payload = response.json()
@@ -101,14 +97,10 @@ def refresh_threads_token(token: str, *, timeout: float = 20.0) -> str:
                 },
             )
     except httpx.HTTPError as exc:
-        raise ThreadsAuthError(
-            f"Threads token refresh failed: {type(exc).__name__}"
-        ) from None
+        raise ThreadsAuthError(f"Threads token refresh failed: {type(exc).__name__}") from None
 
     if response.status_code != 200:
-        raise ThreadsAuthError(
-            f"Threads token refresh failed with HTTP {response.status_code}"
-        )
+        raise ThreadsAuthError(f"Threads token refresh failed with HTTP {response.status_code}")
 
     try:
         payload = response.json()
@@ -137,9 +129,7 @@ def maintain_threads_token(
     if not info.valid:
         raise ThreadsAuthError("Threads access token is invalid")
     if _KEYWORD_SCOPE not in info.scopes:
-        raise ThreadsAuthError(
-            "Threads access token is missing threads_keyword_search permission"
-        )
+        raise ThreadsAuthError("Threads access token is missing threads_keyword_search permission")
 
     remaining = info.remaining(now)
     if remaining is None or remaining > timedelta(days=refresh_before_days):

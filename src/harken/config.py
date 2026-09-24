@@ -151,6 +151,17 @@ class Config:
     bluesky_lang: str | None = field(
         default_factory=lambda: (os.getenv("HARKEN_BLUESKY_LANG") or "").strip() or None
     )
+    instagram_access_token: str | None = field(
+        default_factory=lambda: os.getenv("HARKEN_INSTAGRAM_ACCESS_TOKEN") or None
+    )
+    instagram_user_id: str | None = field(
+        default_factory=lambda: os.getenv("HARKEN_INSTAGRAM_USER_ID") or None
+    )
+    instagram_graph_base: str = field(
+        default_factory=lambda: (
+            os.getenv("HARKEN_INSTAGRAM_GRAPH_BASE") or "https://graph.facebook.com"
+        ).rstrip("/")
+    )
     mastodon_instance: str = field(
         default_factory=lambda: os.getenv("HARKEN_MASTODON_INSTANCE", "mastodon.social")
     )
@@ -171,6 +182,17 @@ class Config:
     )
     youtube_api_key: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_YOUTUBE_API_KEY") or None
+    )
+    tiktok_client_key: str | None = field(
+        default_factory=lambda: os.getenv("HARKEN_TIKTOK_CLIENT_KEY") or None
+    )
+    tiktok_client_secret: str | None = field(
+        default_factory=lambda: os.getenv("HARKEN_TIKTOK_CLIENT_SECRET") or None
+    )
+    tiktok_region_code: str = field(
+        default_factory=lambda: (
+            (os.getenv("HARKEN_TIKTOK_REGION_CODE") or "LV").strip().upper() or "LV"
+        )
     )
     threads_access_token: str | None = field(
         default_factory=lambda: os.getenv("HARKEN_THREADS_ACCESS_TOKEN") or None
@@ -196,10 +218,10 @@ class Config:
         default_factory=lambda: os.getenv("HARKEN_RESEND_API_KEY") or None
     )
     resend_from: str = field(
-        default_factory=lambda: os.getenv(
-            "HARKEN_RESEND_FROM", "noreply@primovezo.com"
-        ).strip()
-        or "noreply@primovezo.com"
+        default_factory=lambda: (
+            os.getenv("HARKEN_RESEND_FROM", "noreply@primovezo.com").strip()
+            or "noreply@primovezo.com"
+        )
     )
     resend_to: list[str] = field(default_factory=lambda: _env_list("HARKEN_RESEND_TO"))
     alert_window_hours: int = field(
@@ -253,9 +275,7 @@ class Config:
         if bool(self.smtp_username) != bool(self.smtp_password):
             raise ValueError("HARKEN_SMTP_USERNAME and HARKEN_SMTP_PASSWORD must be set together")
         if bool(self.resend_api_key) != bool(self.resend_to):
-            raise ValueError(
-                "HARKEN_RESEND_API_KEY and HARKEN_RESEND_TO must be set together"
-            )
+            raise ValueError("HARKEN_RESEND_API_KEY and HARKEN_RESEND_TO must be set together")
         if bool(self.auth_username) != bool(self.auth_password):
             raise ValueError("HARKEN_AUTH_USERNAME and HARKEN_AUTH_PASSWORD must be set together")
         if self.auth_mode == "basic" and not (self.auth_username and self.auth_password):
@@ -270,6 +290,12 @@ class Config:
     def source_options(self, name: str) -> dict:
         if name == "bluesky":
             return {"lang": self.bluesky_lang}
+        if name == "instagram":
+            return {
+                "access_token": self.instagram_access_token,
+                "user_id": self.instagram_user_id,
+                "graph_base": self.instagram_graph_base,
+            }
         if name == "mastodon":
             return {
                 "instance": self.mastodon_instance,
@@ -287,6 +313,12 @@ class Config:
             return {"bearer_token": self.x_bearer_token}
         if name == "youtube":
             return {"api_key": self.youtube_api_key}
+        if name == "tiktok":
+            return {
+                "client_key": self.tiktok_client_key,
+                "client_secret": self.tiktok_client_secret,
+                "region_code": self.tiktok_region_code,
+            }
         if name == "threads":
             return {"access_token": self.threads_access_token}
         return {}

@@ -68,7 +68,11 @@ app.add_typer(threads_app, name="threads")
 console = Console()
 
 
-PRIMOVEZO_ALLOWED_SOURCES = {"bluesky", "threads", "x"}
+PRIMOVEZO_ALLOWED_SOURCES = {
+    "bluesky",
+    "instagram",
+    "threads",
+}
 
 
 def _prepare_primovezo_threads(cfg: Config) -> str | None:
@@ -91,14 +95,11 @@ def _prepare_primovezo_threads(cfg: Config) -> str | None:
             if maintenance.info.expires_at
             else "unknown"
         )
-        console.print(
-            f"[green]✓[/green] Threads token auto-refreshed; new expiry: {expires}"
-        )
+        console.print(f"[green]✓[/green] Threads token auto-refreshed; new expiry: {expires}")
         return None
     if maintenance.refresh_error:
         message = (
-            "Threads token refresh failed; current valid token kept: "
-            f"{maintenance.refresh_error}"
+            f"Threads token refresh failed; current valid token kept: {maintenance.refresh_error}"
         )
         console.print(f"[yellow]![/yellow] {message}")
         return message
@@ -106,10 +107,19 @@ def _prepare_primovezo_threads(cfg: Config) -> str | None:
 
 
 def _primovezo_auto_sources(cfg: Config) -> list[str]:
+    """Return Primovezo sources whose required credentials are configured."""
     sources = ["bluesky"]
     if cfg.threads_access_token:
         sources.append("threads")
+    if cfg.instagram_access_token and cfg.instagram_user_id:
+        sources.append("instagram")
     return sources
+
+
+def _apply_primovezo_source_locales(cfg: Config) -> None:
+    """Bias provider-side discovery to Latvia/Latvian before strict AI filtering."""
+    if "bluesky" in cfg.sources:
+        cfg.bluesky_lang = "lv"
 
 
 @threads_app.command("status")
@@ -140,6 +150,39 @@ def threads_status():
     console.print(f"Token expires: {expiry}")
     console.print(f"Remaining: {remaining}")
     console.print("Auto-refresh: enabled when fewer than 14 days remain")
+
+
+@lead_app.command("source-status")
+def primovezo_source_status():
+    """Show which Primovezo social sources are configured without exposing secrets."""
+    cfg = Config()
+    enabled = set(_primovezo_auto_sources(cfg))
+    table = Table(title="Primovezo social sources")
+    table.add_column("source", style="bold")
+    table.add_column("status")
+    table.add_column("notes")
+
+    rows = [
+        ("bluesky", True, "public search · lang=lv"),
+        (
+            "threads",
+            bool(cfg.threads_access_token),
+            "keyword search · strict Latvian classifier",
+        ),
+        (
+            "instagram",
+            bool(cfg.instagram_access_token and cfg.instagram_user_id),
+            "public hashtag recent media",
+        ),
+    ]
+    for source, configured, notes in rows:
+        status = (
+            "[green]enabled[/green]" if source in enabled and configured else "[dim]disabled[/dim]"
+        )
+        if source == "bluesky":
+            status = "[green]enabled[/green]"
+        table.add_row(source, status, notes)
+    console.print(table)
 
 
 def _version(value: bool):
@@ -346,8 +389,8 @@ def leads_primovezo(
     sources: str = typer.Option(
         None,
         help=(
-            "Comma-separated sources. Default: Bluesky plus Threads when "
-            "HARKEN_THREADS_ACCESS_TOKEN is configured."
+            "Comma-separated sources. Default: Bluesky plus configured Threads "
+            "and Instagram sources."
         ),
     ),
     limit: int = typer.Option(50, min=1, max=100, help="Max items per source and keyword."),
@@ -365,9 +408,7 @@ def leads_primovezo(
     """Scan the built-in Primovezo Latvian commercial-intent keyword profile."""
     base_cfg = Config()
     requested_sources = (
-        {name.strip().lower() for name in sources.split(",") if name.strip()}
-        if sources
-        else None
+        {name.strip().lower() for name in sources.split(",") if name.strip()} if sources else None
     )
     operational_issues: list[str] = []
     if requested_sources is None or "threads" in requested_sources:
@@ -386,8 +427,7 @@ def leads_primovezo(
             param_hint="--sources",
         )
     cfg.lead_enabled = True
-    if "bluesky" in cfg.sources:
-        cfg.bluesky_lang = "lv"
+    _apply_primovezo_source_locales(cfg)
     if cfg.lead_llm_provider.strip().lower() in {"", "none", "null"}:
         raise typer.BadParameter(
             "Primovezo lead scanning requires HARKEN_LEAD_LLM_PROVIDER.",
@@ -439,9 +479,7 @@ def leads_primovezo(
         )
     )
     if "threads" not in cfg.sources and not cfg.threads_access_token:
-        console.print(
-            "[dim]Threads disabled: HARKEN_THREADS_ACCESS_TOKEN is not configured.[/dim]"
-        )
+        console.print("[dim]Threads disabled: HARKEN_THREADS_ACCESS_TOKEN is not configured.[/dim]")
     if digest_resend is None and digest_email is None:
         console.print(
             "[yellow]![/yellow] No internal Resend/SMTP delivery configured; "
@@ -462,6 +500,7 @@ def leads_primovezo(
     try:
         for index, (group, query) in enumerate(keywords, start=1):
             console.print(f"[dim]{index}/{len(keywords)}[/dim] [bold]{group}[/bold] · “{query}”")
+            active_cfg = scan_cfg
             try:
                 result = pipe.track(query, pages=pages)
             except KeyboardInterrupt:
@@ -475,12 +514,10 @@ def leads_primovezo(
             else:
                 for source, err in result.errors.items():
                     console.print(f"  [yellow]![/yellow] {source}: {err}")
-                    operational_issues.append(
-                        f"{source} fetch failed for {query!r}: {err}"
-                    )
+                    operational_issues.append(f"{source} fetch failed for {query!r}: {err}")
                 _print_retries(result)
 
-                source_count = len({name for name in scan_cfg.sources if name.strip()})
+                source_count = len({name for name in active_cfg.sources if name.strip()})
                 source_failed = bool(source_count and len(result.errors) == source_count)
                 if source_failed:
                     failed_keywords += 1
@@ -546,9 +583,7 @@ def leads_primovezo(
                 except Exception as exc:
                     digest_error = f"{type(exc).__name__}: {exc}"
                     for query, ids in grouped.items():
-                        pipe.store.mark_alerts_failed(
-                            query, ids, digest_target_key, digest_error
-                        )
+                        pipe.store.mark_alerts_failed(query, ids, digest_target_key, digest_error)
                 else:
                     for query, ids in grouped.items():
                         pipe.store.mark_alerts_delivered(query, ids, digest_target_key)
@@ -652,7 +687,7 @@ def leads_recent(
     cfg.threads_access_token = base_cfg.threads_access_token
     cfg.lead_enabled = True
     cfg.lead_fallback_alerts = False
-    cfg.bluesky_lang = "lv"
+    _apply_primovezo_source_locales(cfg)
     cfg.source_retries = max(cfg.source_retries, 3)
     cfg.retry_backoff = max(cfg.retry_backoff, 10.0)
 
@@ -692,9 +727,7 @@ def leads_recent(
         )
     )
     if "threads" not in cfg.sources:
-        console.print(
-            "[dim]Threads disabled: HARKEN_THREADS_ACCESS_TOKEN is not configured.[/dim]"
-        )
+        console.print("[dim]Threads disabled: HARKEN_THREADS_ACCESS_TOKEN is not configured.[/dim]")
 
     total_fetched = 0
     total_new = 0
@@ -720,9 +753,7 @@ def leads_recent(
             if result.errors:
                 failed_keywords += 1
             if result.lead_analysis_error:
-                console.print(
-                    f"  [yellow]![/yellow] lead classifier: {result.lead_analysis_error}"
-                )
+                console.print(f"  [yellow]![/yellow] lead classifier: {result.lead_analysis_error}")
             console.print(
                 f"  {result.fetched} fetched · {result.new} new · "
                 f"{result.lead_candidates} qualified"
@@ -755,8 +786,7 @@ def leads_report(
     """Show de-duplicated qualified ecommerce leads across all tracked keywords."""
     active_queries = list(
         dict.fromkeys(
-            query
-            for _, query in (*PRIMOVEZO_LEAD_KEYWORDS, *PRIMOVEZO_DISCOVERY_KEYWORDS)
+            query for _, query in (*PRIMOVEZO_LEAD_KEYWORDS, *PRIMOVEZO_DISCOVERY_KEYWORDS)
         )
     )
     with Store(db or Config().db_path) as store:
@@ -1330,9 +1360,7 @@ def test_alert(
     webhook_url: str = typer.Option(
         None, "--webhook-url", help="Override HARKEN_WEBHOOK_URL for this test."
     ),
-    transport: str = typer.Option(
-        None, help="Delivery transport: webhook, email, or resend."
-    ),
+    transport: str = typer.Option(None, help="Delivery transport: webhook, email, or resend."),
     kind: str = typer.Option(
         "negative", help="Synthetic event: negative, lead, operational, volume, or sentiment."
     ),

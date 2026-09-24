@@ -150,6 +150,7 @@ def test_sources_lists_registry():
     assert result.exit_code == 0
     assert "hackernews" in result.output
     assert "reddit" in result.output
+    assert "instagram" in result.output
 
 
 def test_project_cli_create_add_report_remove_and_delete(tmp_path):
@@ -327,8 +328,7 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
     expected_queries = [
-        query
-        for _, query in (*cli.PRIMOVEZO_LEAD_KEYWORDS, *cli.PRIMOVEZO_DISCOVERY_KEYWORDS)
+        query for _, query in (*cli.PRIMOVEZO_LEAD_KEYWORDS, *cli.PRIMOVEZO_DISCOVERY_KEYWORDS)
     ]
     assert [query for query, *_ in calls] == expected_queries
     assert all(pages == 2 for _, pages, _, _, _, _, _, _ in calls)
@@ -431,6 +431,11 @@ def test_primovezo_auto_enables_threads_when_token_is_configured(tmp_path, monke
     monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
     monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
     monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-token")
+    monkeypatch.delenv("HARKEN_X_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("HARKEN_TIKTOK_CLIENT_KEY", raising=False)
+    monkeypatch.delenv("HARKEN_TIKTOK_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("HARKEN_INSTAGRAM_USER_ID", raising=False)
     monkeypatch.setattr(cli, "_prepare_primovezo_threads", lambda cfg: None)
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
     monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
@@ -444,9 +449,7 @@ def test_primovezo_auto_enables_threads_when_token_is_configured(tmp_path, monke
     assert seen == [(("bluesky", "threads"), "threads-token")]
 
 
-def test_primovezo_recent_auto_enables_threads_when_token_is_configured(
-    tmp_path, monkeypatch
-):
+def test_primovezo_recent_auto_enables_threads_when_token_is_configured(tmp_path, monkeypatch):
     seen = []
 
     class FakePipeline:
@@ -470,6 +473,11 @@ def test_primovezo_recent_auto_enables_threads_when_token_is_configured(
     monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
     monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
     monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-token")
+    monkeypatch.delenv("HARKEN_X_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("HARKEN_TIKTOK_CLIENT_KEY", raising=False)
+    monkeypatch.delenv("HARKEN_TIKTOK_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("HARKEN_INSTAGRAM_USER_ID", raising=False)
     monkeypatch.setattr(cli, "_prepare_primovezo_threads", lambda cfg: None)
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
     monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
@@ -481,6 +489,75 @@ def test_primovezo_recent_auto_enables_threads_when_token_is_configured(
 
     assert result.exit_code == 0, result.output
     assert seen == [(("bluesky", "threads"), "threads-token")]
+
+
+def test_primovezo_only_auto_enables_free_official_sources(tmp_path, monkeypatch):
+    seen = []
+
+    class FakePipeline:
+        def __init__(self, config):
+            seen.append(tuple(config.sources))
+
+        def track(self, query, pages=3):
+            return SimpleNamespace(
+                errors={},
+                retry_counts={},
+                lead_analysis_error=None,
+                lead_candidates=0,
+                lead_candidate_mentions=[],
+                fetched=0,
+                new=0,
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.delenv("HARKEN_THREADS_ACCESS_TOKEN", raising=False)
+    monkeypatch.setenv("HARKEN_X_BEARER_TOKEN", "x-token")
+    monkeypatch.setenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", "instagram-token")
+    monkeypatch.setenv("HARKEN_INSTAGRAM_USER_ID", "ig-user-id")
+    monkeypatch.setenv("HARKEN_TIKTOK_CLIENT_KEY", "research-key")
+    monkeypatch.setenv("HARKEN_TIKTOK_CLIENT_SECRET", "research-secret")
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
+
+    result = runner.invoke(
+        cli.app,
+        ["leads", "primovezo", "--delay", "0", "--db", str(tmp_path / "more-sources.db")],
+    )
+
+    assert result.exit_code == 0, result.output
+    # Paid X access and non-commercial TikTok Research credentials must never
+    # silently turn into Primovezo commercial lead sources.
+    assert seen == [("bluesky", "instagram")]
+
+
+def test_primovezo_source_status_shows_only_lead_sources_without_secrets(monkeypatch):
+    monkeypatch.setenv("HARKEN_THREADS_ACCESS_TOKEN", "threads-secret")
+    monkeypatch.setenv("HARKEN_X_BEARER_TOKEN", "x-secret")
+    monkeypatch.setenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", "instagram-secret")
+    monkeypatch.setenv("HARKEN_INSTAGRAM_USER_ID", "ig-user-id")
+    monkeypatch.setenv("HARKEN_TIKTOK_CLIENT_KEY", "research-key")
+    monkeypatch.setenv("HARKEN_TIKTOK_CLIENT_SECRET", "research-secret")
+
+    result = runner.invoke(cli.app, ["leads", "source-status"])
+
+    assert result.exit_code == 0, result.output
+    for source in ("bluesky", "threads", "instagram"):
+        assert source in result.output
+    for excluded in ("tiktok", "youtube", "mastodon", "recent search"):
+        assert excluded not in result.output
+    assert result.output.count("enabled") >= 3
+    for secret in (
+        "threads-secret",
+        "x-secret",
+        "instagram-secret",
+        "research-key",
+        "research-secret",
+    ):
+        assert secret not in result.output
 
 
 def test_threads_status_reports_health_without_token_value(monkeypatch):
@@ -519,12 +596,10 @@ def test_primovezo_runner_rejects_reddit(monkeypatch):
 
     assert result.exit_code != 0
     assert "does not use: reddit" in result.output
-    assert "bluesky, threads, x" in result.output
+    assert "bluesky, instagram, threads" in result.output
 
 
-def test_primovezo_runner_sends_one_operational_warning_for_partial_failures(
-    tmp_path, monkeypatch
-):
+def test_primovezo_runner_sends_one_operational_warning_for_partial_failures(tmp_path, monkeypatch):
     warnings = []
     calls = []
 
@@ -571,9 +646,7 @@ def test_primovezo_runner_sends_one_operational_warning_for_partial_failures(
     monkeypatch.setattr(
         cli,
         "send_operational_resend",
-        lambda settings, *, issues, run_label: warnings.append(
-            (settings, list(issues), run_label)
-        ),
+        lambda settings, *, issues, run_label: warnings.append((settings, list(issues), run_label)),
     )
 
     result = runner.invoke(

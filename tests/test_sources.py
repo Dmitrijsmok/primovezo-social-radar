@@ -1,5 +1,6 @@
 """Source adapter tests — HTTP is mocked, so these run offline and deterministically."""
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -8,9 +9,11 @@ import respx
 
 from harken.sources.bluesky import BlueskySource
 from harken.sources.hackernews import HackerNewsSource
+from harken.sources.instagram import InstagramSource
 from harken.sources.reddit import RedditSource
 from harken.sources.stackoverflow import StackOverflowSource
 from harken.sources.threads import ThreadsSource
+from harken.sources.tiktok import TikTokSource
 from harken.sources.x import XSource
 from harken.sources.youtube import YouTubeSource
 
@@ -283,6 +286,69 @@ def test_youtube_parses_video_search_and_pagination():
 
 
 @respx.mock
+def test_instagram_resolves_hashtag_and_fetches_recent_public_media():
+    hashtag = respx.get("https://graph.facebook.com/ig_hashtag_search").mock(
+        return_value=httpx.Response(
+            200,
+            json={"data": [{"id": "17843819167049166", "name": "internetveikals"}]},
+        )
+    )
+    media = respx.get("https://graph.facebook.com/17843819167049166/recent_media").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "ig-1",
+                        "caption": "Jauns #internetveikals Latvijā",
+                        "media_type": "IMAGE",
+                        "permalink": "https://www.instagram.com/p/abc/",
+                        "timestamp": "2026-09-23T10:00:00+0000",
+                    }
+                ],
+                "paging": {"cursors": {"after": "next-instagram"}},
+            },
+        )
+    )
+
+    page = InstagramSource(
+        access_token="instagram-token",
+        user_id="ig-user-id",
+    ).fetch_page(
+        "interneta veikals",
+        limit=25,
+        since=datetime(2026, 9, 22, tzinfo=timezone.utc),
+    )
+
+    assert hashtag.calls[0].request.headers["authorization"] == "Bearer instagram-token"
+    assert hashtag.calls[0].request.url.params["q"] == "internetaveikals"
+    assert hashtag.calls[0].request.url.params["user_id"] == "ig-user-id"
+    assert media.calls[0].request.headers["authorization"] == "Bearer instagram-token"
+    assert media.calls[0].request.url.params["user_id"] == "ig-user-id"
+    assert page.next_cursor == "next-instagram"
+    assert len(page.mentions) == 1
+    assert page.mentions[0].source == "instagram"
+    assert page.mentions[0].title == "#internetaveikals"
+    assert page.mentions[0].url == "https://www.instagram.com/p/abc/"
+
+
+@respx.mock
+def test_instagram_caches_hashtag_id_across_pages():
+    hashtag = respx.get("https://graph.facebook.com/ig_hashtag_search").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "tag-1"}]})
+    )
+    media = respx.get("https://graph.facebook.com/tag-1/recent_media").mock(
+        return_value=httpx.Response(200, json={"data": [], "paging": {}})
+    )
+    source = InstagramSource(access_token="token", user_id="user")
+    source.fetch_page("e-komercija")
+    source.fetch_page("e-komercija", cursor="after-1")
+    assert hashtag.call_count == 1
+    assert media.call_count == 2
+    assert media.calls[1].request.url.params["after"] == "after-1"
+
+
+@respx.mock
 def test_threads_parses_keyword_search_and_pagination():
     route = respx.get("https://graph.threads.net/keyword_search").mock(
         return_value=httpx.Response(
@@ -363,9 +429,142 @@ def test_x_parses_posts_authors_metrics_and_pagination():
     assert page.mentions[0].url == "https://x.com/alice/status/123"
 
 
+@respx.mock
+def test_tiktok_research_api_queries_lv_and_includes_voice_to_text():
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=2)
+    fresh = int((now - timedelta(hours=1)).timestamp())
+    old = int((now - timedelta(days=5)).timestamp())
+
+    token_route = respx.post("https://open.tiktokapis.com/v2/oauth/token/").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "access_token": "research-token",
+                "expires_in": 7200,
+                "token_type": "Bearer",
+            },
+        )
+    )
+    query_route = respx.post("https://open.tiktokapis.com/v2/research/video/query/").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": {
+                    "videos": [
+                        {
+                            "id": "123",
+                            "video_description": "Vai Shopify ir tā vērts Latvijā?",
+                            "voice_to_text": "Man vajag vienkāršāku e-komercijas platformu.",
+                            "create_time": fresh,
+                            "region_code": "LV",
+                            "username": "alice",
+                            "like_count": 17,
+                        },
+                        {
+                            "id": "456",
+                            "video_description": "Vecs video",
+                            "create_time": old,
+                            "region_code": "LV",
+                            "username": "bob",
+                        },
+                    ],
+                    "cursor": 2,
+                    "has_more": False,
+                    "search_id": "search-1",
+                },
+                "error": {"code": "ok", "message": "", "log_id": "log-1"},
+            },
+        )
+    )
+
+    page = TikTokSource(
+        client_key="research-key",
+        client_secret="research-secret",
+        region_code="lv",
+    ).fetch_page("Shopify", limit=50, since=since)
+
+    assert token_route.call_count == 1
+    token_request = token_route.calls[0].request
+    token_body = token_request.read().decode()
+    assert "client_key=research-key" in token_body
+    assert "client_secret=research-secret" in token_body
+    assert "grant_type=client_credentials" in token_body
+
+    request = query_route.calls[0].request
+    assert request.headers["authorization"] == "Bearer research-token"
+    assert "research-secret" not in str(request.url)
+    assert "voice_to_text" in request.url.params["fields"]
+
+    payload = json.loads(request.read())
+    assert payload["query"]["and"] == [
+        {
+            "operation": "IN",
+            "field_name": "region_code",
+            "field_values": ["LV"],
+        },
+        {
+            "operation": "EQ",
+            "field_name": "keyword",
+            "field_values": ["Shopify"],
+        },
+    ]
+    assert payload["start_date"] == since.strftime("%Y%m%d")
+    assert payload["end_date"] == now.strftime("%Y%m%d")
+    assert payload["max_count"] == 50
+    assert payload["is_random"] is False
+
+    assert len(page.mentions) == 1
+    mention = page.mentions[0]
+    assert mention.source == "tiktok"
+    assert mention.author == "alice"
+    assert mention.score == 17
+    assert mention.url == "https://www.tiktok.com/@alice/video/123"
+    assert "[voice_to_text] Man vajag vienkāršāku e-komercijas platformu." in mention.text
+
+
+@respx.mock
+def test_tiktok_research_api_returns_opaque_pagination_cursor_and_reuses_token():
+    token_route = respx.post("https://open.tiktokapis.com/v2/oauth/token/").mock(
+        return_value=httpx.Response(
+            200,
+            json={"access_token": "research-token", "expires_in": 7200},
+        )
+    )
+    query_route = respx.post("https://open.tiktokapis.com/v2/research/video/query/").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": {
+                    "videos": [],
+                    "cursor": 100,
+                    "has_more": True,
+                    "search_id": "search-1",
+                },
+                "error": {"code": "ok", "message": ""},
+            },
+        )
+    )
+
+    source = TikTokSource(client_key="key", client_secret="secret")
+    first = source.fetch_page("e-komercija")
+    source.fetch_page("e-komercija", cursor=first.next_cursor)
+
+    assert token_route.call_count == 1
+    assert query_route.call_count == 2
+    payload = json.loads(query_route.calls[1].request.read())
+    assert payload["cursor"] == 100
+    assert payload["search_id"] == "search-1"
+
+
 @pytest.mark.parametrize(
     ("source", "message"),
-    [(YouTubeSource(), "HARKEN_YOUTUBE_API_KEY"), (XSource(), "HARKEN_X_BEARER_TOKEN")],
+    [
+        (YouTubeSource(), "HARKEN_YOUTUBE_API_KEY"),
+        (XSource(), "HARKEN_X_BEARER_TOKEN"),
+        (InstagramSource(), "HARKEN_INSTAGRAM_ACCESS_TOKEN"),
+        (TikTokSource(), "HARKEN_TIKTOK_CLIENT_KEY"),
+    ],
 )
 def test_keyed_sources_fail_before_network_without_credentials(source, message):
     with pytest.raises(RuntimeError, match=message):
