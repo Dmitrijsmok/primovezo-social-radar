@@ -77,7 +77,34 @@ HARKEN_THREADS_ACCESS_TOKEN=<token>
 ```
 
 Without that variable, Threads stays disabled. Primovezo always keeps Bluesky
-enabled and also auto-enables Instagram when its official Meta credentials are present:
+enabled.
+
+Bluesky public search is attempted without credentials first. Some datacenter egress
+addresses can receive HTTP 403 from both public AppView hosts. For a reliable production
+fallback, create a dedicated Bluesky **app password** and configure:
+
+```dotenv
+HARKEN_BLUESKY_IDENTIFIER=your-handle.bsky.social
+HARKEN_BLUESKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+# Default for Bluesky-hosted accounts:
+HARKEN_BLUESKY_PDS=https://bsky.social
+```
+
+Do not use the main Bluesky account password. Only after both public AppViews answer with
+401/403 does Harken create a short-lived PDS session and proxy
+`app.bsky.feed.searchPosts` to the Bluesky AppView through the official
+`atproto-proxy` service identifier. The app password is never included in search URLs or
+application logs. If no authenticated fallback is configured, a blocked public search fails
+once with an actionable configuration error instead of retrying the same raw 403.
+
+Quick isolated verification:
+
+```bash
+rm -f /tmp/harken-bsky-test.db
+uv run harken track Shopify --sources bluesky --limit 1 --db /tmp/harken-bsky-test.db
+```
+
+Primovezo also auto-enables Instagram when its official Meta credentials are present:
 
 ```dotenv
 HARKEN_INSTAGRAM_ACCESS_TOKEN=<instagram-user-token>
