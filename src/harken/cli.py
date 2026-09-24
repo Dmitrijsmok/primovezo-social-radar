@@ -358,7 +358,13 @@ def leads_primovezo(
 ):
     """Scan the built-in Primovezo Latvian commercial-intent keyword profile."""
     base_cfg = Config()
-    _prepare_primovezo_threads(base_cfg)
+    requested_sources = (
+        {name.strip().lower() for name in sources.split(",") if name.strip()}
+        if sources
+        else None
+    )
+    if requested_sources is None or "threads" in requested_sources:
+        _prepare_primovezo_threads(base_cfg)
     selected_sources = sources or ",".join(_primovezo_auto_sources(base_cfg))
     cfg = _tracking_config(selected_sources, limit, db)
     cfg.threads_access_token = base_cfg.threads_access_token
