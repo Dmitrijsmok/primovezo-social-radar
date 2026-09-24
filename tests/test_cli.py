@@ -328,8 +328,7 @@ def test_primovezo_lead_runner_scans_profile_with_delay(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
     expected_queries = [
-        query
-        for _, query in (*cli.PRIMOVEZO_LEAD_KEYWORDS, *cli.PRIMOVEZO_DISCOVERY_KEYWORDS)
+        query for _, query in (*cli.PRIMOVEZO_LEAD_KEYWORDS, *cli.PRIMOVEZO_DISCOVERY_KEYWORDS)
     ]
     assert [query for query, *_ in calls] == expected_queries
     assert all(pages == 2 for _, pages, _, _, _, _, _, _ in calls)
@@ -450,9 +449,7 @@ def test_primovezo_auto_enables_threads_when_token_is_configured(tmp_path, monke
     assert seen == [(("bluesky", "threads"), "threads-token")]
 
 
-def test_primovezo_recent_auto_enables_threads_when_token_is_configured(
-    tmp_path, monkeypatch
-):
+def test_primovezo_recent_auto_enables_threads_when_token_is_configured(tmp_path, monkeypatch):
     seen = []
 
     class FakePipeline:
@@ -494,9 +491,7 @@ def test_primovezo_recent_auto_enables_threads_when_token_is_configured(
     assert seen == [(("bluesky", "threads"), "threads-token")]
 
 
-def test_primovezo_only_auto_enables_free_official_sources(
-    tmp_path, monkeypatch
-):
+def test_primovezo_only_auto_enables_free_official_sources(tmp_path, monkeypatch):
     seen = []
 
     class FakePipeline:
@@ -565,7 +560,6 @@ def test_primovezo_source_status_shows_only_lead_sources_without_secrets(monkeyp
         assert secret not in result.output
 
 
-
 def test_threads_status_reports_health_without_token_value(monkeypatch):
     from harken.threads_auth import ThreadsTokenInfo
 
@@ -605,9 +599,7 @@ def test_primovezo_runner_rejects_reddit(monkeypatch):
     assert "bluesky, instagram, threads" in result.output
 
 
-def test_primovezo_runner_sends_one_operational_warning_for_partial_failures(
-    tmp_path, monkeypatch
-):
+def test_primovezo_runner_sends_one_operational_warning_for_partial_failures(tmp_path, monkeypatch):
     warnings = []
     calls = []
 
@@ -654,9 +646,7 @@ def test_primovezo_runner_sends_one_operational_warning_for_partial_failures(
     monkeypatch.setattr(
         cli,
         "send_operational_resend",
-        lambda settings, *, issues, run_label: warnings.append(
-            (settings, list(issues), run_label)
-        ),
+        lambda settings, *, issues, run_label: warnings.append((settings, list(issues), run_label)),
     )
 
     result = runner.invoke(
