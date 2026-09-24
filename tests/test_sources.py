@@ -8,6 +8,7 @@ import respx
 
 from harken.sources.bluesky import BlueskySource
 from harken.sources.hackernews import HackerNewsSource
+from harken.sources.instagram import InstagramSource
 from harken.sources.mastodon import MastodonSource
 from harken.sources.reddit import RedditSource
 from harken.sources.stackoverflow import StackOverflowSource
@@ -284,6 +285,71 @@ def test_youtube_parses_video_search_and_pagination():
 
 
 @respx.mock
+def test_instagram_resolves_hashtag_and_fetches_recent_public_media():
+    hashtag = respx.get("https://graph.facebook.com/ig_hashtag_search").mock(
+        return_value=httpx.Response(
+            200,
+            json={"data": [{"id": "17843819167049166", "name": "internetveikals"}]},
+        )
+    )
+    media = respx.get(
+        "https://graph.facebook.com/17843819167049166/recent_media"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "ig-1",
+                        "caption": "Jauns #internetveikals Latvijā",
+                        "media_type": "IMAGE",
+                        "permalink": "https://www.instagram.com/p/abc/",
+                        "timestamp": "2026-09-23T10:00:00+0000",
+                    }
+                ],
+                "paging": {"cursors": {"after": "next-instagram"}},
+            },
+        )
+    )
+
+    page = InstagramSource(
+        access_token="instagram-token",
+        user_id="ig-user-id",
+    ).fetch_page(
+        "interneta veikals",
+        limit=25,
+        since=datetime(2026, 9, 22, tzinfo=timezone.utc),
+    )
+
+    assert hashtag.calls[0].request.headers["authorization"] == "Bearer instagram-token"
+    assert hashtag.calls[0].request.url.params["q"] == "internetaveikals"
+    assert hashtag.calls[0].request.url.params["user_id"] == "ig-user-id"
+    assert media.calls[0].request.headers["authorization"] == "Bearer instagram-token"
+    assert media.calls[0].request.url.params["user_id"] == "ig-user-id"
+    assert page.next_cursor == "next-instagram"
+    assert len(page.mentions) == 1
+    assert page.mentions[0].source == "instagram"
+    assert page.mentions[0].title == "#internetaveikals"
+    assert page.mentions[0].url == "https://www.instagram.com/p/abc/"
+
+
+@respx.mock
+def test_instagram_caches_hashtag_id_across_pages():
+    hashtag = respx.get("https://graph.facebook.com/ig_hashtag_search").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "tag-1"}]})
+    )
+    media = respx.get("https://graph.facebook.com/tag-1/recent_media").mock(
+        return_value=httpx.Response(200, json={"data": [], "paging": {}})
+    )
+    source = InstagramSource(access_token="token", user_id="user")
+    source.fetch_page("e-komercija")
+    source.fetch_page("e-komercija", cursor="after-1")
+    assert hashtag.call_count == 1
+    assert media.call_count == 2
+    assert media.calls[1].request.url.params["after"] == "after-1"
+
+
+@respx.mock
 def test_youtube_can_bias_results_to_latvia_and_latvian():
     route = respx.get("https://www.googleapis.com/youtube/v3/search").mock(
         return_value=httpx.Response(200, json={"items": []})
@@ -438,7 +504,11 @@ def test_mastodon_filters_recent_results_by_language_and_window():
 
 @pytest.mark.parametrize(
     ("source", "message"),
-    [(YouTubeSource(), "HARKEN_YOUTUBE_API_KEY"), (XSource(), "HARKEN_X_BEARER_TOKEN")],
+    [
+        (YouTubeSource(), "HARKEN_YOUTUBE_API_KEY"),
+        (XSource(), "HARKEN_X_BEARER_TOKEN"),
+        (InstagramSource(), "HARKEN_INSTAGRAM_ACCESS_TOKEN"),
+    ],
 )
 def test_keyed_sources_fail_before_network_without_credentials(source, message):
     with pytest.raises(RuntimeError, match=message):
