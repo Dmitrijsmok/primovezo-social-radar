@@ -273,10 +273,7 @@ def send_live_test_resend(
     run_at = datetime.now(timezone.utc)
     cleaned_issues = [issue.strip() for issue in issues or [] if issue and issue.strip()]
     source_names = list(dict.fromkeys(source.strip() for source in sources if source.strip()))
-    subject = (
-        f"[Primovezo Social Radar TEST] live scan: {fetched} fetched, "
-        f"{qualified} qualified"
-    )
+    subject = f"[Primovezo Social Radar TEST] live scan: {fetched} fetched, {qualified} qualified"
     body = _live_test_text(
         mentions,
         fetched=fetched,
@@ -295,8 +292,7 @@ def send_live_test_resend(
         + body
     )
     idempotency_key = (
-        "primovezo-live-test/"
-        + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:48]
+        "primovezo-live-test/" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:48]
     )
     try:
         response = httpx.post(
