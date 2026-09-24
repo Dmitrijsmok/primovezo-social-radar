@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -442,82 +444,135 @@ def test_x_can_filter_primovezo_searches_to_latvian_and_exclude_reposts():
 
 
 @respx.mock
-def test_tiktok_uses_apify_keyword_video_search_with_lv_proxy_and_local_since_filter():
-    route = respx.post(
-        "https://api.apify.com/v2/actors/clockworks~tiktok-scraper/"
-        "run-sync-get-dataset-items"
+def test_tiktok_research_api_queries_lv_and_includes_voice_to_text():
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=2)
+    fresh = int((now - timedelta(hours=1)).timestamp())
+    old = int((now - timedelta(days=5)).timestamp())
+
+    token_route = respx.post("https://open.tiktokapis.com/v2/oauth/token/").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "access_token": "research-token",
+                "expires_in": 7200,
+                "token_type": "Bearer",
+            },
+        )
+    )
+    query_route = respx.post(
+        "https://open.tiktokapis.com/v2/research/video/query/"
     ).mock(
         return_value=httpx.Response(
             200,
-            json=[
-                {
-                    "id": "new",
-                    "text": "Vai Shopify ir tā vērts Latvijā?",
-                    "textLanguage": "lv",
-                    "createTimeISO": "2026-09-23T10:00:00.000Z",
-                    "authorMeta": {"name": "alice", "nickName": "Alice"},
-                    "webVideoUrl": "https://www.tiktok.com/@alice/video/new",
-                    "diggCount": 17,
+            json={
+                "data": {
+                    "videos": [
+                        {
+                            "id": "123",
+                            "video_description": "Vai Shopify ir tā vērts Latvijā?",
+                            "voice_to_text": "Man vajag vienkāršāku e-komercijas platformu.",
+                            "create_time": fresh,
+                            "region_code": "LV",
+                            "username": "alice",
+                            "like_count": 17,
+                        },
+                        {
+                            "id": "456",
+                            "video_description": "Vecs video",
+                            "create_time": old,
+                            "region_code": "LV",
+                            "username": "bob",
+                        },
+                    ],
+                    "cursor": 2,
+                    "has_more": False,
+                    "search_id": "search-1",
                 },
-                {
-                    "id": "old",
-                    "text": "Vecs video",
-                    "createTimeISO": "2026-09-18T10:00:00.000Z",
-                    "authorMeta": {"name": "bob"},
-                    "webVideoUrl": "https://www.tiktok.com/@bob/video/old",
-                },
-            ],
+                "error": {"code": "ok", "message": "", "log_id": "log-1"},
+            },
         )
     )
 
     page = TikTokSource(
-        apify_token="apify-secret",
-        max_results=15,
-        proxy_country="lv",
-    ).fetch_page(
-        "Shopify",
-        limit=50,
-        since=datetime(2026, 9, 20, tzinfo=timezone.utc),
-    )
+        client_key="research-key",
+        client_secret="research-secret",
+        region_code="lv",
+    ).fetch_page("Shopify", limit=50, since=since)
 
-    request = route.calls[0].request
-    assert request.headers["authorization"] == "Bearer apify-secret"
-    assert "apify-secret" not in str(request.url)
-    payload = request.read().decode()
-    assert '"searchQueries":["Shopify"]' in payload
-    assert '"searchSection":"/video"' in payload
-    assert '"resultsPerPage":15' in payload
-    assert '"proxyCountryCode":"LV"' in payload
-    assert '"videoSearchSorting":"LATEST"' in payload
+    assert token_route.call_count == 1
+    token_request = token_route.calls[0].request
+    token_body = token_request.read().decode()
+    assert "client_key=research-key" in token_body
+    assert "client_secret=research-secret" in token_body
+    assert "grant_type=client_credentials" in token_body
+
+    request = query_route.calls[0].request
+    assert request.headers["authorization"] == "Bearer research-token"
+    assert "research-secret" not in str(request.url)
+    assert "voice_to_text" in request.url.params["fields"]
+
+    payload = json.loads(request.read())
+    assert payload["query"]["and"] == [
+        {
+            "operation": "IN",
+            "field_name": "region_code",
+            "field_values": ["LV"],
+        },
+        {
+            "operation": "EQ",
+            "field_name": "keyword",
+            "field_values": ["Shopify"],
+        },
+    ]
+    assert payload["start_date"] == since.strftime("%Y%m%d")
+    assert payload["end_date"] == now.strftime("%Y%m%d")
+    assert payload["max_count"] == 50
+    assert payload["is_random"] is False
+
     assert len(page.mentions) == 1
-    assert page.mentions[0].source == "tiktok"
-    assert page.mentions[0].author == "alice"
-    assert page.mentions[0].score == 17
-    assert page.mentions[0].url == "https://www.tiktok.com/@alice/video/new"
+    mention = page.mentions[0]
+    assert mention.source == "tiktok"
+    assert mention.author == "alice"
+    assert mention.score == 17
+    assert mention.url == "https://www.tiktok.com/@alice/video/123"
+    assert "[voice_to_text] Man vajag vienkāršāku e-komercijas platformu." in mention.text
 
 
 @respx.mock
-def test_tiktok_skips_apify_error_items_and_fabricates_url_only_with_author_and_id():
-    respx.post(
-        "https://api.apify.com/v2/actors/clockworks~tiktok-scraper/"
-        "run-sync-get-dataset-items"
+def test_tiktok_research_api_returns_opaque_pagination_cursor_and_reuses_token():
+    token_route = respx.post("https://open.tiktokapis.com/v2/oauth/token/").mock(
+        return_value=httpx.Response(
+            200,
+            json={"access_token": "research-token", "expires_in": 7200},
+        )
+    )
+    query_route = respx.post(
+        "https://open.tiktokapis.com/v2/research/video/query/"
     ).mock(
         return_value=httpx.Response(
             200,
-            json=[
-                {"errorCode": "SEARCH_QUERY_NOT_FOUND", "error": "No videos"},
-                {
-                    "id": "123",
-                    "text": "E-komercija",
-                    "createTime": 1_700_000_000,
-                    "authorMeta": {"name": "alice"},
+            json={
+                "data": {
+                    "videos": [],
+                    "cursor": 100,
+                    "has_more": True,
+                    "search_id": "search-1",
                 },
-            ],
+                "error": {"code": "ok", "message": ""},
+            },
         )
     )
-    page = TikTokSource(apify_token="token").fetch_page("e-komercija")
-    assert len(page.mentions) == 1
-    assert page.mentions[0].url == "https://www.tiktok.com/@alice/video/123"
+
+    source = TikTokSource(client_key="key", client_secret="secret")
+    first = source.fetch_page("e-komercija")
+    second = source.fetch_page("e-komercija", cursor=first.next_cursor)
+
+    assert token_route.call_count == 1
+    assert query_route.call_count == 2
+    payload = json.loads(query_route.calls[1].request.read())
+    assert payload["cursor"] == 100
+    assert payload["search_id"] == "search-1"
 
 
 @pytest.mark.parametrize(
@@ -526,7 +581,7 @@ def test_tiktok_skips_apify_error_items_and_fabricates_url_only_with_author_and_
         (YouTubeSource(), "HARKEN_YOUTUBE_API_KEY"),
         (XSource(), "HARKEN_X_BEARER_TOKEN"),
         (InstagramSource(), "HARKEN_INSTAGRAM_ACCESS_TOKEN"),
-        (TikTokSource(), "HARKEN_TIKTOK_APIFY_TOKEN"),
+        (TikTokSource(), "HARKEN_TIKTOK_CLIENT_KEY"),
     ],
 )
 def test_keyed_sources_fail_before_network_without_credentials(source, message):
