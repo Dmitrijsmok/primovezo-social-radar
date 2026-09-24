@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from harken.auth import validate_role, validate_username
-from harken.models import Mention, Sentiment
+from harken.models import ConversationPost, Mention, Sentiment
 
 _CREATE_MENTIONS = """
 CREATE TABLE mentions (
@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS lead_analysis (
     category         TEXT NOT NULL,
     reason           TEXT NOT NULL,
     suggested_reply  TEXT,
+    conversation     TEXT NOT NULL DEFAULT '[]',
     analyzed_at      TEXT NOT NULL,
     PRIMARY KEY (mention_id, query),
     FOREIGN KEY (mention_id, query) REFERENCES mentions(id, query) ON DELETE CASCADE
@@ -183,7 +184,7 @@ CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
 # Bumped when the on-disk schema or a one-time reconciliation step changes.
 # Stored in `PRAGMA user_version` so _ensure_schema() can skip the expensive
 # whole-table reconciliation on every connection once a DB is up to date.
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 
 class Store:
@@ -257,6 +258,13 @@ class Store:
                 + _PROJECT_SCHEMA
                 + _AUTH_SCHEMA
             )
+            cur.execute("PRAGMA table_info(lead_analysis)")
+            lead_columns = {row["name"] for row in cur.fetchall()}
+            if "conversation" not in lead_columns:
+                cur.execute(
+                    "ALTER TABLE lead_analysis "
+                    "ADD COLUMN conversation TEXT NOT NULL DEFAULT '[]'"
+                )
             cur.execute(
                 """
                 INSERT OR IGNORE INTO tracked_queries
@@ -643,14 +651,15 @@ class Store:
                     """
                     INSERT INTO lead_analysis
                         (mention_id, query, relevant, score, category, reason,
-                         suggested_reply, analyzed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         suggested_reply, conversation, analyzed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(mention_id, query) DO UPDATE SET
                         relevant = excluded.relevant,
                         score = excluded.score,
                         category = excluded.category,
                         reason = excluded.reason,
                         suggested_reply = excluded.suggested_reply,
+                        conversation = excluded.conversation,
                         analyzed_at = excluded.analyzed_at
                     """,
                     (
@@ -661,6 +670,10 @@ class Store:
                         mention.lead_category or "other",
                         mention.lead_reason or "",
                         mention.suggested_reply,
+                        json.dumps(
+                            [item.model_dump(mode="json") for item in mention.conversation],
+                            ensure_ascii=False,
+                        ),
                         now,
                     ),
                 )
@@ -673,7 +686,7 @@ class Store:
         with closing(self._conn.cursor()) as cur:
             cur.execute(
                 """
-                SELECT relevant, score, category, reason, suggested_reply, analyzed_at
+                SELECT relevant, score, category, reason, suggested_reply, conversation, analyzed_at
                 FROM lead_analysis
                 WHERE query = ? AND mention_id = ?
                 """,
@@ -684,6 +697,13 @@ class Store:
             return None
         value = dict(row)
         value["relevant"] = bool(value["relevant"])
+        try:
+            value["conversation"] = [
+                ConversationPost.model_validate(item)
+                for item in json.loads(value.get("conversation") or "[]")
+            ]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            value["conversation"] = []
         return value
 
     def unique_leads(
@@ -1122,7 +1142,8 @@ class Store:
                        l.score AS lead_score,
                        l.category AS lead_category,
                        l.reason AS lead_reason,
-                       l.suggested_reply AS suggested_reply
+                       l.suggested_reply AS suggested_reply,
+                       l.conversation AS lead_conversation
                 FROM alert_outbox AS a
                 JOIN mentions AS m ON m.query = a.query AND m.id = a.mention_id
                 LEFT JOIN lead_analysis AS l
@@ -1147,7 +1168,8 @@ class Store:
                        l.score AS lead_score,
                        l.category AS lead_category,
                        l.reason AS lead_reason,
-                       l.suggested_reply AS suggested_reply
+                       l.suggested_reply AS suggested_reply,
+                       l.conversation AS lead_conversation
                 FROM alert_outbox AS a
                 JOIN mentions AS m ON m.query = a.query AND m.id = a.mention_id
                 LEFT JOIN lead_analysis AS l
@@ -1643,6 +1665,15 @@ def _row_to_mention(r: sqlite3.Row) -> Mention:
     lead_relevant = None
     if "lead_relevant" in keys and r["lead_relevant"] is not None:
         lead_relevant = bool(r["lead_relevant"])
+    conversation: list[ConversationPost] = []
+    if "lead_conversation" in keys and r["lead_conversation"]:
+        try:
+            conversation = [
+                ConversationPost.model_validate(item)
+                for item in json.loads(r["lead_conversation"])
+            ]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            conversation = []
     return Mention(
         id=r["id"],
         source=r["source"],
@@ -1661,6 +1692,7 @@ def _row_to_mention(r: sqlite3.Row) -> Mention:
         lead_category=r["lead_category"] if "lead_category" in keys else None,
         lead_reason=r["lead_reason"] if "lead_reason" in keys else None,
         suggested_reply=r["suggested_reply"] if "suggested_reply" in keys else None,
+        conversation=conversation,
     )
 
 
