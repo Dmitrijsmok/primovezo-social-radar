@@ -36,8 +36,10 @@ class BlueskySource(Source):
         **options,
     ):
         super().__init__(**options)
-        self.identifier = (identifier or "").strip() or None
-        self.app_password = (app_password or "").strip() or None
+        normalized_identifier = (identifier or "").strip().lstrip("@")
+        normalized_password = "".join((app_password or "").split())
+        self.identifier = normalized_identifier or None
+        self.app_password = normalized_password or None
         self.pds = (pds or "https://bsky.social").strip().rstrip("/")
 
     def fetch(self, query: str, limit: int = 50) -> list[Mention]:
