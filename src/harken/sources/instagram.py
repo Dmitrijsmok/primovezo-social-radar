@@ -79,9 +79,6 @@ class InstagramSource(Source):
         mentions: list[Mention] = []
         for item in payload.get("data", []):
             permalink = item.get("permalink")
-            media_id = item.get("id")
-            if not permalink and media_id:
-                permalink = f"https://www.instagram.com/p/{media_id}/"
             created = _parse_datetime(item.get("timestamp"))
             if since and created <= since:
                 continue
