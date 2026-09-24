@@ -15,17 +15,9 @@ class YouTubeSource(Source):
     label = "YouTube"
     needs_config = True
 
-    def __init__(
-        self,
-        api_key: str | None = None,
-        relevance_language: str | None = None,
-        region_code: str | None = None,
-        **options,
-    ):
+    def __init__(self, api_key: str | None = None, **options):
         super().__init__(**options)
         self.api_key = api_key
-        self.relevance_language = (relevance_language or "").strip() or None
-        self.region_code = (region_code or "").strip().upper() or None
 
     def fetch(self, query: str, limit: int = 50) -> list[Mention]:
         return self.fetch_page(query, limit=limit).mentions
@@ -48,10 +40,6 @@ class YouTubeSource(Source):
             "order": "date",
             "maxResults": min(limit, 50),
         }
-        if self.relevance_language:
-            params["relevanceLanguage"] = self.relevance_language
-        if self.region_code:
-            params["regionCode"] = self.region_code
         if cursor:
             params["pageToken"] = cursor
         if since:
