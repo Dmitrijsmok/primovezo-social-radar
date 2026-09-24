@@ -64,28 +64,33 @@ HARKEN_THREADS_ACCESS_TOKEN=<token>
 ```
 
 Without that variable, Threads stays disabled. Primovezo always keeps Bluesky
-enabled and also auto-enables X, Instagram, or TikTok when their corresponding
-credentials are present:
+enabled and also auto-enables Instagram when its official Meta credentials are present:
 
 ```dotenv
-HARKEN_X_BEARER_TOKEN=<x-bearer-token>
 HARKEN_INSTAGRAM_ACCESS_TOKEN=<instagram-user-token>
 HARKEN_INSTAGRAM_USER_ID=<instagram-professional-user-id>
-HARKEN_TIKTOK_APIFY_TOKEN=<apify-token>
 ```
 
-For the Primovezo profile, X is restricted with `lang:lv` and reposts are excluded.
 Instagram uses Meta's hashtag-search surface, normalizing each radar phrase into a hashtag
 candidate and then reading recent public media. Meta limits hashtag discovery and requires
 Facebook Login with a professional Instagram account, so Instagram remains disabled until
 both its access token and IG user id are configured.
 
-TikTok organic search is not available through TikTok's normal commercial developer APIs.
-Primovezo therefore supports an optional Apify-backed adapter using
-`clockworks~tiktok-scraper`. It searches public TikTok videos through a Latvia proxy,
-requests latest video results, keeps at most 15 results per query by default, and runs only
-for the broad discovery keyword set. The same strict original-Latvian classifier remains
-the final gate before a TikTok result can become a lead.
+X and TikTok are deliberately outside the Primovezo commercial lead runner. X remains a
+generic Harken adapter for operators who already have suitable API access. TikTok uses only
+the official Research API and requires an approved non-commercial Research Tools project:
+
+```dotenv
+HARKEN_TIKTOK_CLIENT_KEY=<research-client-key>
+HARKEN_TIKTOK_CLIENT_SECRET=<research-client-secret>
+HARKEN_TIKTOK_REGION_CODE=LV
+```
+
+With approved research credentials, use generic Harken tracking for ecommerce content
+analysis, for example `uv run harken track "e-komercija" --sources tiktok`. The adapter
+requests captions, engagement metadata, and available `voice_to_text`. TikTok's keyword
+condition searches the video description, so spoken text enriches analysis but does not by
+itself make a video discoverable.
 
 Use a **long-lived** Threads token. Before every Primovezo daily/recent scan, Harken
 checks its validity, `threads_keyword_search` scope, and expiry. If fewer than 14 days
