@@ -147,6 +147,9 @@ class Config:
     lead_fallback_alerts: bool = field(
         default_factory=lambda: _bool_env("HARKEN_LEAD_FALLBACK_ALERTS", True)
     )
+    lead_excluded_authors: list[str] = field(
+        default_factory=lambda: _env_list("HARKEN_LEAD_EXCLUDED_AUTHORS")
+    )
     # source-specific options
     bluesky_lang: str | None = field(
         default_factory=lambda: (os.getenv("HARKEN_BLUESKY_LANG") or "").strip() or None
@@ -286,6 +289,17 @@ class Config:
             raise ValueError(
                 "HARKEN_AUTH_USERNAME and HARKEN_AUTH_PASSWORD require basic auth mode"
             )
+
+    def is_lead_author_excluded(self, author: str | None) -> bool:
+        if not author:
+            return False
+        normalized = author.strip().lstrip("@").casefold()
+        excluded = {
+            value.strip().lstrip("@").casefold()
+            for value in self.lead_excluded_authors
+            if value.strip()
+        }
+        return normalized in excluded
 
     def source_options(self, name: str) -> dict:
         if name == "bluesky":
