@@ -248,6 +248,16 @@ def test_bluesky_public_block_without_auth_has_actionable_sanitized_error():
     assert "403" not in str(exc.value)
 
 
+def test_bluesky_normalizes_handle_prefix_and_app_password_whitespace():
+    source = BlueskySource(
+        identifier="  @Radar.Bsky.Social  ",
+        app_password="abcd- efgh\n-ijkl -mnop",
+    )
+
+    assert source.identifier == "Radar.Bsky.Social"
+    assert source.app_password == "abcd-efgh-ijkl-mnop"
+
+
 @respx.mock
 def test_bluesky_login_error_is_sanitized_but_actionable():
     BlueskySource._session_cache.clear()
