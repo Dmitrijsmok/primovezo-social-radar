@@ -185,8 +185,14 @@ def primovezo_source_status():
     table.add_column("status")
     table.add_column("notes")
 
+    bluesky_auth = bool(cfg.bluesky_identifier and cfg.bluesky_app_password)
     rows = [
-        ("bluesky", True, "public search · lang=lv"),
+        (
+            "bluesky",
+            True,
+            "public search · authenticated PDS fallback "
+            + ("configured" if bluesky_auth else "not configured"),
+        ),
         (
             "threads",
             bool(cfg.threads_access_token),
