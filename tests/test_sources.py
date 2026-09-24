@@ -431,6 +431,166 @@ def test_threads_parses_keyword_search_and_pagination():
     assert page.mentions[0].url == "https://www.threads.net/@alice/post/th-123"
 
 
+@respx.mock
+def test_threads_reply_keyword_hit_is_normalized_to_root_conversation():
+    search = respx.get("https://graph.threads.net/keyword_search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "reply-1",
+                        "username": "dmitry.mokeyev",
+                        "text": "Man Shopify vairāk nepatīk par Mozello.",
+                        "permalink": "https://www.threads.com/@dmitry.mokeyev/post/reply-1",
+                        "timestamp": "2026-09-24T09:30:00+0000",
+                        "is_reply": True,
+                        "root_post": {"id": "root-1"},
+                        "replied_to": {"id": "root-1"},
+                    }
+                ],
+                "paging": {},
+            },
+        )
+    )
+    root = respx.get("https://graph.threads.net/root-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "root-1",
+                "username": "shop.owner",
+                "text": (
+                    "Internetveikala īpašnieki — kurā platformā izveidojāt savu veikalu, "
+                    "un vai ar savu izvēli esat apmierināti?"
+                ),
+                "permalink": "https://www.threads.com/@shop.owner/post/root-1",
+                "timestamp": "2026-09-24T08:00:00+0000",
+                "has_replies": True,
+            },
+        )
+    )
+    conversation = respx.get("https://graph.threads.net/root-1/conversation").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "reply-1",
+                        "username": "dmitry.mokeyev",
+                        "text": "Man Shopify vairāk nepatīk par Mozello.",
+                        "permalink": "https://www.threads.com/@dmitry.mokeyev/post/reply-1",
+                        "timestamp": "2026-09-24T09:30:00+0000",
+                        "is_reply": True,
+                        "root_post": {"id": "root-1"},
+                        "replied_to": {"id": "root-1"},
+                    },
+                    {
+                        "id": "reply-2",
+                        "username": "another.user",
+                        "text": "Es izvēlējos WooCommerce.",
+                        "permalink": "https://www.threads.com/@another.user/post/reply-2",
+                        "timestamp": "2026-09-24T09:40:00+0000",
+                        "is_reply": True,
+                        "root_post": {"id": "root-1"},
+                        "replied_to": {"id": "reply-1"},
+                    },
+                ]
+            },
+        )
+    )
+
+    page = ThreadsSource(access_token="secret-token").fetch_page("Shopify", limit=10)
+
+    assert search.called and root.called and conversation.called
+    assert len(page.mentions) == 1
+    mention = page.mentions[0]
+    assert mention.author == "shop.owner"
+    assert mention.url == "https://www.threads.com/@shop.owner/post/root-1"
+    assert "kurā platformā" in mention.text
+    assert [item.author for item in mention.conversation] == [
+        "shop.owner",
+        "dmitry.mokeyev",
+        "another.user",
+    ]
+    assert mention.conversation[0].depth == 0
+    assert mention.conversation[1].depth == 1
+    assert mention.conversation[1].matched is True
+    assert mention.conversation[2].depth == 2
+
+
+@respx.mock
+def test_threads_reply_context_survives_missing_full_conversation_permission():
+    respx.get("https://graph.threads.net/keyword_search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "reply-1",
+                        "username": "reply.user",
+                        "text": "Shopify",
+                        "timestamp": "2026-09-24T09:30:00+0000",
+                        "is_reply": True,
+                        "root_post": {"id": "root-1"},
+                        "replied_to": {"id": "root-1"},
+                    }
+                ]
+            },
+        )
+    )
+    respx.get("https://graph.threads.net/root-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "root-1",
+                "username": "prospect",
+                "text": "Kuru platformu izvēlēties interneta veikalam?",
+                "timestamp": "2026-09-24T08:00:00+0000",
+            },
+        )
+    )
+    respx.get("https://graph.threads.net/root-1/conversation").mock(
+        return_value=httpx.Response(403)
+    )
+
+    mention = ThreadsSource(access_token="token").fetch("Shopify")[0]
+
+    assert mention.author == "prospect"
+    assert len(mention.conversation) == 2
+    assert mention.conversation[0].author == "prospect"
+    assert mention.conversation[1].author == "reply.user"
+    assert mention.conversation[1].matched is True
+
+
+@respx.mock
+def test_threads_keyword_search_falls_back_when_relation_fields_are_rejected():
+    route = respx.get("https://graph.threads.net/keyword_search").mock(
+        side_effect=[
+            httpx.Response(400, json={"error": {"message": "unsupported fields"}}),
+            httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "id": "th-plain",
+                            "username": "alice",
+                            "text": "Shopify",
+                            "timestamp": "2026-09-24T09:30:00+0000",
+                        }
+                    ]
+                },
+            ),
+        ]
+    )
+
+    mention = ThreadsSource(access_token="token").fetch("Shopify")[0]
+
+    assert route.call_count == 2
+    assert route.calls[0].request.url.params["fields"] != route.calls[1].request.url.params["fields"]
+    assert mention.author == "alice"
+    assert mention.conversation == []
+
+
 def test_threads_requires_access_token():
     with pytest.raises(RuntimeError, match="HARKEN_THREADS_ACCESS_TOKEN"):
         ThreadsSource().fetch("ecommerce")
