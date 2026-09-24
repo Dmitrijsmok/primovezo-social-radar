@@ -196,7 +196,7 @@ def primovezo_source_status():
         (
             "threads",
             bool(cfg.threads_access_token),
-            "keyword search · reply/root context when threads_read_replies is granted",
+            "keyword search · root/reply context when Meta returns relation IDs",
         ),
         (
             "instagram",
