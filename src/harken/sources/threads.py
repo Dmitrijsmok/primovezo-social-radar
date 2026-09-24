@@ -61,9 +61,10 @@ class ThreadsSource(Source):
         with self._client(headers=headers) as client:
             response = client.get(_API, params=params)
             # Older/limited keyword-search surfaces may reject reply-only
-            # relationship fields. Keep keyword discovery working and simply
-            # fall back to a context-free result in that case.
-            if response.status_code in {400, 403}:
+            # relationship fields. Keep keyword discovery working, then ask
+            # the media-object endpoint for relation metadata per result.
+            relation_fallback = response.status_code in {400, 403}
+            if relation_fallback:
                 params["fields"] = _BASIC_FIELDS
                 response = client.get(_API, params=params)
             response.raise_for_status()
@@ -71,6 +72,11 @@ class ThreadsSource(Source):
 
             mentions: list[Mention] = []
             for post in data.get("data", []):
+                if relation_fallback:
+                    post_id = str(post.get("id") or "").strip()
+                    detail = _fetch_reply_detail(client, post_id) if post_id else None
+                    if detail:
+                        post = {**post, **detail}
                 mention = _mention_with_context(client, query, post)
                 if mention is not None:
                     mentions.append(mention)
@@ -117,6 +123,18 @@ def _mention_with_context(
                 matched_post=post,
             )
     return mention
+
+
+def _fetch_reply_detail(client: httpx.Client, thread_id: str) -> dict | None:
+    response = client.get(
+        f"{_GRAPH}/{thread_id}",
+        params={"fields": _REPLY_FIELDS},
+    )
+    if response.status_code in {400, 403, 404}:
+        return None
+    response.raise_for_status()
+    value = response.json()
+    return value if isinstance(value, dict) else None
 
 
 def _fetch_thread(client: httpx.Client, thread_id: str) -> dict | None:
