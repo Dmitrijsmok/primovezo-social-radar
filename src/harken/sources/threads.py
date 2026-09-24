@@ -79,7 +79,10 @@ class ThreadsSource(Source):
                 needs_relation_detail = (
                     relation_fallback
                     or "is_reply" not in post
-                    or (post.get("is_reply") is True and not _relation_id(post.get("root_post")))
+                    or (
+                        post.get("is_reply") is True
+                        and not _relation_id(post.get("root_post"))
+                    )
                 )
                 if needs_relation_detail and post_id:
                     detail = _fetch_reply_detail(client, post_id)
