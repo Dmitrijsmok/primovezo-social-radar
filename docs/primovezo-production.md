@@ -94,6 +94,20 @@ The scan stores qualified leads even if Resend is not configured. With Resend
 configured, the full scan sends one de-duplicated internal digest only when
 there are new or previously queued qualified leads.
 
+The same internal Resend recipient also receives **one operational warning per
+daily run** when the scan completes only partially, for example after a source
+still fails after retries, the lead classifier fails, or a Threads token refresh
+cannot be completed. Healthy runs do not send an operational email.
+
+The scheduled shell wrapper separately sends a failure alert if the Harken
+process itself exits non-zero or cannot start. The daily process is capped at
+90 minutes by default so a stuck run also becomes a visible failure. This
+fallback notifier reads only the local `.env` and uses Python's standard
+library, so it does not depend on the Harken package or `uv` being healthy.
+
+A local failure notifier cannot report a total server outage or a timer that
+never starts at all. That case requires an external dead-man/heartbeat monitor.
+
 ## 4. Install the daily user timer
 
 ```bash
