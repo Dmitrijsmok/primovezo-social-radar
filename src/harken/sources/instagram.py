@@ -44,8 +44,7 @@ class InstagramSource(Source):
     ) -> FetchPage:
         if not self.access_token or not self.user_id:
             raise RuntimeError(
-                "Instagram requires HARKEN_INSTAGRAM_ACCESS_TOKEN and "
-                "HARKEN_INSTAGRAM_USER_ID"
+                "Instagram requires HARKEN_INSTAGRAM_ACCESS_TOKEN and HARKEN_INSTAGRAM_USER_ID"
             )
 
         hashtag = _hashtag_candidate(query)
