@@ -10,6 +10,7 @@ from __future__ import annotations
 from harken.sources.base import Source
 from harken.sources.bluesky import BlueskySource
 from harken.sources.hackernews import HackerNewsSource
+from harken.sources.instagram import InstagramSource
 from harken.sources.mastodon import MastodonSource
 from harken.sources.reddit import RedditSource
 from harken.sources.rss import RSSSource
@@ -20,6 +21,7 @@ from harken.sources.youtube import YouTubeSource
 
 REGISTRY: dict[str, type[Source]] = {
     HackerNewsSource.name: HackerNewsSource,
+    InstagramSource.name: InstagramSource,
     RedditSource.name: RedditSource,
     MastodonSource.name: MastodonSource,
     BlueskySource.name: BlueskySource,
