@@ -279,9 +279,7 @@ def test_live_test_resend_is_clearly_marked_and_contains_real_classification():
     request = route.calls[0].request
     payload = json.loads(request.content)
     assert request.headers["Idempotency-Key"].startswith("primovezo-live-test/")
-    assert payload["subject"] == (
-        "[Primovezo Social Radar TEST] live scan: 7 fetched, 0 qualified"
-    )
+    assert payload["subject"] == ("[Primovezo Social Radar TEST] live scan: 7 fetched, 0 qualified")
     assert "TEST ONLY" in payload["text"]
     assert "real public-source fetch results" in payload["text"]
     assert "AI relevant: no" in payload["text"]
