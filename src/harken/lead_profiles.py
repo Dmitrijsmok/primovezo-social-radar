@@ -24,7 +24,11 @@ PRIMOVEZO_LEAD_KEYWORDS: tuple[tuple[str, str], ...] = (
 PRIMOVEZO_DISCOVERY_KEYWORDS: tuple[tuple[str, str], ...] = (
     ("discovery", "Shopify"),
     ("discovery", "WooCommerce"),
+    ("discovery", "Mozello"),
     ("discovery", "Etsy"),
+    ("discovery", "interneta veikala platforma"),
+    ("discovery", "e-veikala platforma"),
+    ("discovery", "veikala platforma"),
     ("discovery", "interneta veikals"),
     ("discovery", "internetveikals"),
     ("discovery", "e-komercija"),
