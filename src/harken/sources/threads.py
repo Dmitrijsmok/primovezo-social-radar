@@ -12,9 +12,7 @@ from harken.sources.base import FetchPage, Source
 _API = "https://graph.threads.net/keyword_search"
 _GRAPH = "https://graph.threads.net"
 _BASIC_FIELDS = "id,text,username,permalink,timestamp"
-_RELATION_FIELDS = (
-    _BASIC_FIELDS + ",has_replies,is_reply,is_reply_owned_by_me,root_post,replied_to"
-)
+_RELATION_FIELDS = _BASIC_FIELDS + ",has_replies,is_reply,is_reply_owned_by_me,root_post,replied_to"
 _REPLY_FIELDS = (
     "id,text,username,permalink,timestamp,has_replies,is_reply,"
     "is_reply_owned_by_me,root_post,replied_to"
