@@ -160,10 +160,9 @@ class Config:
     bluesky_app_password: str | None = field(
         default_factory=lambda: (os.getenv("HARKEN_BLUESKY_APP_PASSWORD") or "").strip() or None
     )
-    bluesky_pds: str = field(
+    bluesky_pds: str | None = field(
         default_factory=lambda: (
-            (os.getenv("HARKEN_BLUESKY_PDS") or "https://bsky.social").strip().rstrip("/")
-            or "https://bsky.social"
+            (os.getenv("HARKEN_BLUESKY_PDS") or "").strip().rstrip("/") or None
         )
     )
     instagram_access_token: str | None = field(
