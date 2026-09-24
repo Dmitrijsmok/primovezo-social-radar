@@ -27,12 +27,13 @@ class BlueskySource(Source):
     # access JWT across instances so a multi-keyword Primovezo scan does not log in
     # once per query when Hetzner/public AppView traffic is being blocked.
     _session_cache: dict[tuple[str, str], str] = {}
+    _pds_cache: dict[str, str] = {}
 
     def __init__(
         self,
         identifier: str | None = None,
         app_password: str | None = None,
-        pds: str = "https://bsky.social",
+        pds: str | None = None,
         **options,
     ):
         super().__init__(**options)
@@ -40,7 +41,7 @@ class BlueskySource(Source):
         normalized_password = "".join((app_password or "").split())
         self.identifier = normalized_identifier or None
         self.app_password = normalized_password or None
-        self.pds = (pds or "https://bsky.social").strip().rstrip("/")
+        self.pds = (pds or "").strip().rstrip("/") or None
 
     def fetch(self, query: str, limit: int = 50) -> list[Mention]:
         return self.fetch_page(query, limit=limit).mentions
@@ -114,7 +115,8 @@ class BlueskySource(Source):
         raise RuntimeError("Bluesky search failed without a response")
 
     def _authenticated_search(self, params: dict) -> dict:
-        cache_key = (self.pds, self.identifier or "")
+        pds = self._authenticated_pds()
+        cache_key = (pds, self.identifier or "")
         token = self._session_cache.get(cache_key)
         if not token:
             token = self._create_session()
@@ -137,11 +139,85 @@ class BlueskySource(Source):
         response.raise_for_status()
         return response.json()
 
+    def _authenticated_pds(self) -> str:
+        if self.pds:
+            return self.pds
+        if not self.identifier:
+            raise RuntimeError("Bluesky PDS discovery requires an account identifier")
+        if "@" in self.identifier:
+            raise RuntimeError(
+                "Bluesky PDS cannot be auto-discovered from an email identifier; "
+                "set HARKEN_BLUESKY_PDS explicitly"
+            )
+
+        cached = self._pds_cache.get(self.identifier.casefold())
+        if cached:
+            self.pds = cached
+            return cached
+
+        pds = self._discover_pds(self.identifier)
+        self._pds_cache[self.identifier.casefold()] = pds
+        self.pds = pds
+        return pds
+
+    def _discover_pds(self, handle: str) -> str:
+        try:
+            with self._client() as client:
+                did_response = client.get(f"https://{handle}/.well-known/atproto-did")
+        except httpx.RequestError as exc:
+            raise RuntimeError(
+                f"Bluesky DID discovery failed: {type(exc).__name__}"
+            ) from None
+
+        if did_response.status_code != 200:
+            raise RuntimeError(
+                f"Bluesky DID discovery failed with HTTP {did_response.status_code}"
+            )
+
+        did = did_response.text.strip()
+        if not did.startswith("did:plc:"):
+            raise RuntimeError(
+                "Bluesky DID discovery returned an unsupported DID; "
+                "set HARKEN_BLUESKY_PDS explicitly"
+            )
+
+        try:
+            with self._client() as client:
+                doc_response = client.get(f"https://plc.directory/{did}")
+        except httpx.RequestError as exc:
+            raise RuntimeError(
+                f"Bluesky DID document lookup failed: {type(exc).__name__}"
+            ) from None
+
+        if doc_response.status_code != 200:
+            raise RuntimeError(
+                f"Bluesky DID document lookup failed with HTTP {doc_response.status_code}"
+            )
+
+        try:
+            document = doc_response.json()
+            services = document["service"]
+        except (ValueError, KeyError, TypeError):
+            raise RuntimeError("Bluesky DID document lookup returned invalid JSON") from None
+
+        for service in services:
+            if not isinstance(service, dict):
+                continue
+            if service.get("id") != "#atproto_pds":
+                continue
+            endpoint = service.get("serviceEndpoint")
+            if isinstance(endpoint, str) and endpoint.startswith("https://"):
+                return endpoint.rstrip("/")
+
+        raise RuntimeError(
+            "Bluesky DID document contains no HTTPS #atproto_pds service endpoint"
+        )
+
     def _create_session(self) -> str:
         try:
             with self._client() as client:
                 response = client.post(
-                    self.pds + _CREATE_SESSION_PATH,
+                    self._authenticated_pds() + _CREATE_SESSION_PATH,
                     json={
                         "identifier": self.identifier,
                         "password": self.app_password,
@@ -178,7 +254,7 @@ class BlueskySource(Source):
         }
         try:
             with self._client(headers=headers) as client:
-                return client.get(self.pds + _SEARCH_PATH, params=params)
+                return client.get(self._authenticated_pds() + _SEARCH_PATH, params=params)
         except httpx.RequestError as exc:
             raise RuntimeError(
                 f"Bluesky authenticated proxy search failed: {type(exc).__name__}"
