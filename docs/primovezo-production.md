@@ -86,12 +86,13 @@ fallback, create a dedicated Bluesky **app password** and configure:
 ```dotenv
 HARKEN_BLUESKY_IDENTIFIER=your-handle.bsky.social
 HARKEN_BLUESKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
-# Default for Bluesky-hosted accounts:
-HARKEN_BLUESKY_PDS=https://bsky.social
+# Optional override only; normally auto-discovered from the account DID:
+# HARKEN_BLUESKY_PDS=https://your-account-pds.example
 ```
 
 Do not use the main Bluesky account password. When these credentials are configured, Harken
-skips the public AppView hosts entirely, creates a short-lived PDS session, and proxies
+resolves the handle to its DID, reads the DID document's `#atproto_pds` endpoint, skips the
+public AppView hosts entirely, creates a short-lived session on that account PDS, and proxies
 `app.bsky.feed.searchPosts` to the Bluesky AppView through the official
 `atproto-proxy` service identifier. The app password is never included in search URLs or
 application logs. Without configured credentials Harken keeps the zero-config public path; if
