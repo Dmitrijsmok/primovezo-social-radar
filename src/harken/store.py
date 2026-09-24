@@ -262,8 +262,7 @@ class Store:
             lead_columns = {row["name"] for row in cur.fetchall()}
             if "conversation" not in lead_columns:
                 cur.execute(
-                    "ALTER TABLE lead_analysis "
-                    "ADD COLUMN conversation TEXT NOT NULL DEFAULT '[]'"
+                    "ALTER TABLE lead_analysis ADD COLUMN conversation TEXT NOT NULL DEFAULT '[]'"
                 )
             cur.execute(
                 """
@@ -1669,8 +1668,7 @@ def _row_to_mention(r: sqlite3.Row) -> Mention:
     if "lead_conversation" in keys and r["lead_conversation"]:
         try:
             conversation = [
-                ConversationPost.model_validate(item)
-                for item in json.loads(r["lead_conversation"])
+                ConversationPost.model_validate(item) for item in json.loads(r["lead_conversation"])
             ]
         except (TypeError, ValueError, json.JSONDecodeError):
             conversation = []
