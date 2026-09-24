@@ -342,7 +342,9 @@ def test_pipeline_excludes_owned_authors_before_lead_classification(tmp_path, mo
     assert result.lead_candidate_mentions[0].author == "prospect.lv"
     assert pipe.store.lead_analysis("Shopify", result.lead_candidate_mentions[0].id) is not None
     own = next(
-        mention for mention in pipe.store.mentions(query="Shopify") if mention.author == "dmitry.mokeyev"
+        mention
+        for mention in pipe.store.mentions(query="Shopify")
+        if mention.author == "dmitry.mokeyev"
     )
     assert pipe.store.lead_analysis("Shopify", own.id) is None
     pipe.close()
