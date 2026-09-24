@@ -214,6 +214,7 @@ def test_bluesky_uses_authenticated_pds_proxy_without_probing_public_appviews():
         lang="lv",
         identifier="radar.bsky.social",
         app_password="app-password-secret",
+        pds="https://bsky.social",
     ).fetch("Shopify")
 
     assert not public.called and not alternate.called
@@ -230,6 +231,60 @@ def test_bluesky_uses_authenticated_pds_proxy_without_probing_public_appviews():
     assert proxy_request.url.params["lang"] == "lv"
     assert len(out) == 1
     assert out[0].author == "prospect.bsky.social"
+
+
+@respx.mock
+def test_bluesky_auto_discovers_account_pds_from_handle_did_document():
+    BlueskySource._session_cache.clear()
+    BlueskySource._pds_cache.clear()
+    did = "did:plc:zhlgr4h57wecaecsmbvugeop"
+    pds = "https://coral.us-east.host.bsky.network"
+
+    well_known = respx.get(
+        "https://dorsmok.bsky.social/.well-known/atproto-did"
+    ).mock(return_value=httpx.Response(200, text=did))
+    plc = respx.get(f"https://plc.directory/{did}").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": did,
+                "alsoKnownAs": ["at://dorsmok.bsky.social"],
+                "service": [
+                    {
+                        "id": "#atproto_pds",
+                        "type": "AtprotoPersonalDataServer",
+                        "serviceEndpoint": pds,
+                    }
+                ],
+            },
+        )
+    )
+    login = respx.post(f"{pds}/xrpc/com.atproto.server.createSession").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "accessJwt": "access-jwt",
+                "refreshJwt": "refresh-jwt",
+                "handle": "dorsmok.bsky.social",
+                "did": did,
+            },
+        )
+    )
+    proxied = respx.get(f"{pds}/xrpc/app.bsky.feed.searchPosts").mock(
+        return_value=httpx.Response(200, json={"posts": []})
+    )
+
+    out = BlueskySource(
+        identifier="dorsmok.bsky.social",
+        app_password="app-password-secret",
+    ).fetch("Shopify")
+
+    assert out == []
+    assert well_known.called and plc.called and login.called and proxied.called
+    assert login.calls[0].request.url.host == "coral.us-east.host.bsky.network"
+    assert proxied.calls[0].request.headers["atproto-proxy"] == (
+        "did:web:api.bsky.app#bsky_appview"
+    )
 
 
 @respx.mock
@@ -276,6 +331,7 @@ def test_bluesky_login_error_is_sanitized_but_actionable():
         BlueskySource(
             identifier="radar.bsky.social",
             app_password=secret,
+            pds="https://bsky.social",
         ).fetch("Shopify")
 
     message = str(exc.value)
@@ -305,6 +361,7 @@ def test_bluesky_authenticated_proxy_relogs_once_after_expired_session():
     out = BlueskySource(
         identifier="radar.bsky.social",
         app_password="app-password-secret",
+        pds="https://bsky.social",
     ).fetch("Shopify")
 
     assert out == []
