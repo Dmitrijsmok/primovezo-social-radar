@@ -19,10 +19,11 @@ addresses there. The runner never emails a social-network author.
 The sending domain must be verified in Resend before using
 `noreply@primovezo.com`.
 
-Verify the exact digest format without scanning social networks:
+Verify the exact digest and operational-warning delivery without scanning social networks:
 
 ```bash
 uv run harken test-alert --transport resend --kind lead
+uv run harken test-alert --transport resend --kind operational
 ```
 
 The Resend request uses an idempotency key derived from the digest contents and
