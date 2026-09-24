@@ -156,7 +156,7 @@ def maintain_threads_token(
                 "refreshed Threads token failed validation or lost keyword-search permission"
             )
         persist_threads_token(refreshed, env_path=env_path)
-    except ThreadsAuthError as exc:
+    except (ThreadsAuthError, OSError) as exc:
         return ThreadsTokenMaintenance(
             token=token,
             info=info,
