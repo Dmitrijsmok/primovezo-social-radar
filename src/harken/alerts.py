@@ -526,7 +526,6 @@ def _lead_alert_text(query: str, mentions: list[Mention]) -> str:
                     f"• {source} · score {mention.lead_score}/100"
                     + (f" · {mention.lead_category}" if mention.lead_category else ""),
                     f"  {mention.lead_reason or 'No reason supplied.'}",
-                    f"  {excerpt}",
                 ]
             )
             if mention.conversation:
@@ -567,14 +566,15 @@ def _live_test_text(
         lines.extend(f"- {issue}" for issue in issues[:20])
 
     if not mentions:
-        lines.extend(
-            [
-                "",
+        lines.append("")
+        if fetched:
+            lines.append(
                 "Live posts were fetched, but none remained in the reportable sample after "
-                "author exclusions/context normalization.",
-                "The source-to-Resend delivery path still completed successfully.",
-            ]
-        )
+                "author exclusions/context normalization."
+            )
+        else:
+            lines.append("No matching public posts were returned by this live test.")
+        lines.append("The source-to-Resend delivery path still completed successfully.")
         return "\n".join(lines)
 
     lines.extend(["", f"Live sample ({min(len(mentions), 10)}):"])
@@ -646,4 +646,5 @@ def _mention_payload(mention: Mention) -> dict:
         "lead_category": mention.lead_category,
         "lead_reason": mention.lead_reason,
         "suggested_reply": mention.suggested_reply,
+        "conversation": [item.model_dump(mode="json") for item in mention.conversation],
     }
