@@ -162,6 +162,17 @@ def test_lead_fallback_alerts_can_be_disabled(monkeypatch):
     assert config.Config().lead_fallback_alerts is False
 
 
+def test_lead_excluded_authors_are_casefolded_at_match_time(monkeypatch):
+    monkeypatch.setenv("HARKEN_LEAD_EXCLUDED_AUTHORS", " @Dmitry.Mokeyev , primovezo ")
+    cfg = config.Config()
+
+    assert cfg.lead_excluded_authors == ["@Dmitry.Mokeyev", "primovezo"]
+    assert cfg.is_lead_author_excluded("dmitry.mokeyev")
+    assert cfg.is_lead_author_excluded("@DMITRY.MOKEYEV")
+    assert cfg.is_lead_author_excluded("Primovezo")
+    assert not cfg.is_lead_author_excluded("prospect.lv")
+
+
 def test_partial_email_configuration_is_rejected(monkeypatch):
     monkeypatch.setenv("HARKEN_EMAIL_TO", "ops@example.test")
     with pytest.raises(ValueError, match="must be set together"):
