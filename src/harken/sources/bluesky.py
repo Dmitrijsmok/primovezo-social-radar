@@ -159,7 +159,9 @@ class BlueskySource(Source):
             payload = response.json()
             access_jwt = payload["accessJwt"]
         except (ValueError, KeyError, TypeError):
-            raise RuntimeError("Bluesky authenticated fallback login returned invalid JSON") from None
+            raise RuntimeError(
+                "Bluesky authenticated fallback login returned invalid JSON"
+            ) from None
         if not isinstance(access_jwt, str) or not access_jwt.strip():
             raise RuntimeError("Bluesky authenticated fallback login returned no access token")
         return access_jwt.strip()
