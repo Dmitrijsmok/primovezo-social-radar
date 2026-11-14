@@ -7,7 +7,7 @@ import httpx
 import pytest
 import respx
 
-from harken.sources.rss import RSSSource, _entry_time
+from harken.sources.rss import RSSSource, _entry_time, _unwrap_redirect
 
 _FEED_A = """<?xml version="1.0"?>
 <rss version="2.0"><channel>
@@ -76,6 +76,46 @@ def test_uses_the_shared_timeout_client():
 def test_requires_at_least_one_feed():
     with pytest.raises(RuntimeError, match="HARKEN_RSS_FEEDS"):
         RSSSource().fetch("acme")
+
+
+_GOOGLE_ALERTS_FEED = """<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<id>tag:google.com,2013:googlealerts/feed:1</id>
+<title>Google Alert - interneta veikals</title>
+<entry>
+<id>tag:google.com,2013:googlealerts/feed:1:entry:1</id>
+<title type="html">K&#257; izveidot &lt;b&gt;interneta&lt;/b&gt; &lt;b&gt;veikalu&lt;/b&gt; bez programm&#275;t&#257;ja</title>
+<link href="https://www.google.com/url?rct=j&amp;sa=t&amp;url=https://forums.example.lv/t/123&amp;ct=ga&amp;cd=X&amp;usg=Y"/>
+<published>2026-11-14T08:00:00Z</published>
+<content type="html">Meklēju &lt;b&gt;interneta&lt;/b&gt; &lt;b&gt;veikalu&lt;/b&gt; ar &amp;quot;Mozello&amp;quot;?</content>
+</entry>
+</feed>"""
+
+
+@respx.mock
+def test_matches_multi_word_query_inside_google_alerts_bold_markup():
+    respx.get("https://www.google.com/alerts/feeds/1/2").mock(
+        return_value=httpx.Response(200, content=_GOOGLE_ALERTS_FEED.encode("utf-8"))
+    )
+    src = RSSSource(feeds=["https://www.google.com/alerts/feeds/1/2"])
+
+    out = src.fetch("meklēju interneta veikalu", limit=50)
+
+    assert len(out) == 1
+    assert out[0].title == "Kā izveidot interneta veikalu bez programmētāja"
+    assert out[0].text == 'Meklēju interneta veikalu ar "Mozello"?'
+    assert out[0].url == "https://forums.example.lv/t/123"
+    assert out[0].created_at == datetime(2026, 11, 14, 8, 0, tzinfo=timezone.utc)
+
+
+def test_unwrap_redirect_only_unwraps_google_redirects():
+    google = "https://www.google.com/url?rct=j&sa=t&url=https://shop.example.lv/a&ct=ga"
+    assert _unwrap_redirect(google) == "https://shop.example.lv/a"
+    other = "https://evil.example/url?url=https://shop.example.lv/a"
+    assert _unwrap_redirect(other) == other
+    no_target = "https://www.google.com/url?rct=j&sa=t&url=javascript:alert(1)"
+    assert _unwrap_redirect(no_target) == no_target
+    assert _unwrap_redirect(None) is None
 
 
 def test_feed_struct_time_is_interpreted_as_utc():

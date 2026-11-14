@@ -73,6 +73,7 @@ console = Console()
 PRIMOVEZO_ALLOWED_SOURCES = {
     "bluesky",
     "instagram",
+    "rss",
     "threads",
 }
 
@@ -134,6 +135,8 @@ def _primovezo_auto_sources(cfg: Config) -> list[str]:
         sources.append("threads")
     if cfg.instagram_access_token and cfg.instagram_user_id:
         sources.append("instagram")
+    if cfg.rss_feeds:
+        sources.append("rss")
     return sources
 
 
@@ -202,6 +205,11 @@ def primovezo_source_status():
             "instagram",
             bool(cfg.instagram_access_token and cfg.instagram_user_id),
             "public hashtag recent media",
+        ),
+        (
+            "rss",
+            bool(cfg.rss_feeds),
+            f"Google Alerts or other feeds · {len(cfg.rss_feeds)} configured",
         ),
     ]
     for source, configured, notes in rows:
@@ -600,8 +608,8 @@ def leads_primovezo(
     sources: str = typer.Option(
         None,
         help=(
-            "Comma-separated sources. Default: Bluesky plus configured Threads "
-            "and Instagram sources."
+            "Comma-separated sources. Default: Bluesky plus configured Threads, "
+            "Instagram and RSS sources."
         ),
     ),
     limit: int = typer.Option(50, min=1, max=100, help="Max items per source and keyword."),
