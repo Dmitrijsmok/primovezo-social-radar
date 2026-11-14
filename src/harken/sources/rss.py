@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from calendar import timegm
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlsplit
 
 import feedparser
 import httpx
@@ -39,9 +40,11 @@ class RSSSource(Source):
                     continue  # one bad/slow feed shouldn't cost the others their fetch
                 parsed = feedparser.parse(resp.content)
                 for entry in parsed.entries:
-                    title = entry.get("title", "")
-                    summary = entry.get("summary", "")
-                    blob = f"{title} {summary}".casefold()
+                    # Google Alerts wraps every matched word in <b> tags, so a
+                    # multi-word query only matches the plain text.
+                    title = strip_html(entry.get("title", ""))
+                    text = strip_html(entry.get("summary", ""))
+                    blob = f"{title} {text}".casefold()
                     if q not in blob:
                         continue
                     created = _entry_time(entry)
@@ -51,12 +54,25 @@ class RSSSource(Source):
                             query=query,
                             author=entry.get("author"),
                             title=title or None,
-                            text=strip_html(summary),
-                            url=entry.get("link"),
+                            text=text,
+                            url=_unwrap_redirect(entry.get("link")),
                             created_at=created,
                         )
                     )
         return mentions[:limit]
+
+
+def _unwrap_redirect(link: str | None) -> str | None:
+    """Return the target of a Google Alerts redirect link, or the link unchanged."""
+    if not link:
+        return link
+    parts = urlsplit(link)
+    host = parts.netloc.lower()
+    if parts.path == "/url" and (host == "google.com" or host.endswith(".google.com")):
+        target = parse_qs(parts.query).get("url", [""])[0]
+        if target.startswith(("https://", "http://")):
+            return target
+    return link
 
 
 def _entry_time(entry) -> datetime:

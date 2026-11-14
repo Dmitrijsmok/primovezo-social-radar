@@ -535,6 +535,52 @@ def test_primovezo_only_auto_enables_free_official_sources(tmp_path, monkeypatch
     assert seen == [("bluesky", "instagram")]
 
 
+def test_primovezo_auto_enables_rss_when_feeds_are_configured(tmp_path, monkeypatch):
+    seen = []
+
+    class FakePipeline:
+        def __init__(self, config):
+            seen.append((tuple(config.sources), tuple(config.rss_feeds)))
+
+        def track(self, query, pages=3):
+            return SimpleNamespace(
+                errors={},
+                retry_counts={},
+                lead_analysis_error=None,
+                lead_candidates=0,
+                lead_candidate_mentions=[],
+                fetched=0,
+                new=0,
+            )
+
+        def close(self):
+            pass
+
+    feeds = "https://www.google.com/alerts/feeds/1/2,https://www.google.com/alerts/feeds/1/3"
+    monkeypatch.setenv("HARKEN_LEAD_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HARKEN_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("HARKEN_RSS_FEEDS", feeds)
+    monkeypatch.delenv("HARKEN_THREADS_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("HARKEN_INSTAGRAM_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("HARKEN_INSTAGRAM_USER_ID", raising=False)
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+    monkeypatch.setattr(cli, "get_provider", lambda name: SimpleNamespace(available=True))
+
+    result = runner.invoke(
+        cli.app,
+        ["leads", "primovezo", "--delay", "0", "--db", str(tmp_path / "rss.db")],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen == [(("bluesky", "rss"), tuple(feeds.split(",")))]
+
+    status = runner.invoke(cli.app, ["leads", "source-status"])
+    assert status.exit_code == 0, status.output
+    assert "rss" in status.output
+    assert "2 configured" in status.output
+    assert "alerts/feeds" not in status.output
+
+
 def test_live_email_test_uses_isolated_db_and_real_classification(monkeypatch):
     seen_configs = []
     calls = []
@@ -739,7 +785,7 @@ def test_primovezo_runner_rejects_reddit(monkeypatch):
 
     assert result.exit_code != 0
     assert "does not use: reddit" in result.output
-    assert "bluesky, instagram, threads" in result.output
+    assert "bluesky, instagram, rss, threads" in result.output
 
 
 def test_primovezo_runner_sends_one_operational_warning_for_partial_failures(tmp_path, monkeypatch):
